@@ -5,6 +5,10 @@
   const input = document.getElementById('message-input');
   const sendBtn = document.getElementById('send-btn');
 
+  // The chat this page is writing to. Empty until the first message of a brand-new
+  // chat is sent, at which point the server returns the new id and we adopt it.
+  let sessionId = window.__SESSION_ID__ || null;
+
   // Auto-grow textarea
   input.addEventListener('input', function () {
     this.style.height = 'auto';
@@ -20,6 +24,38 @@
   });
 
   sendBtn.addEventListener('click', sendFromInput);
+
+  // ── Sidebar chat actions (pin / delete) ───────────────────────────────────
+  // Delegated so it also covers chats injected after a new conversation starts.
+  const sidebar = document.querySelector('.chat-sidebar');
+  if (sidebar) {
+    sidebar.addEventListener('click', function (e) {
+      const pinBtn = e.target.closest('.pin-btn');
+      const delBtn = e.target.closest('.delete-btn');
+      if (!pinBtn && !delBtn) return;
+      e.preventDefault();
+      const item = (pinBtn || delBtn).closest('.session-item');
+      const id = item && item.dataset.id;
+      if (!id) return;
+
+      if (pinBtn) {
+        fetch('/api/chat/session/' + id + '/pin', { method: 'POST' })
+          .then(r => r.json())
+          .then(() => location.reload())   // reload re-sorts pinned-first, keeps current chat
+          .catch(() => {});
+      } else {
+        if (!confirm('Delete this chat? This cannot be undone.')) return;
+        fetch('/api/chat/session/' + id, { method: 'DELETE' })
+          .then(r => r.json())
+          .then(() => {
+            // Leaving the chat you're viewing → go to the most recent remaining one.
+            if (id === sessionId) window.location.href = '/chat';
+            else location.reload();
+          })
+          .catch(() => {});
+      }
+    });
+  }
 
   function sendFromInput() {
     const text = input.value.trim();
@@ -40,11 +76,18 @@
     fetch('/api/chat/message', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text, clarifications }),
+      body: JSON.stringify({ message: text, clarifications, session_id: sessionId }),
     })
       .then(r => r.json())
       .then(data => {
         typingEl.remove();
+        // Adopt the chat id the server assigned (first message of a new chat),
+        // and reflect it in the URL so a refresh stays in the same chat.
+        if (data.session_id && data.session_id !== sessionId) {
+          sessionId = data.session_id;
+          try { history.replaceState(null, '', '/chat?session=' + sessionId); } catch (e) { /* noop */ }
+          ensureSidebarEntry(sessionId, data.session_title || sidebarTitle(text));
+        }
         if (data.error) {
           appendErrorMessage(data.error);
         } else if (data.needs_clarification) {
@@ -213,8 +256,11 @@
       ? `<span class="badge badge-general" title="Not from a cited guideline — Whoof AI's general veterinary knowledge">general guidance</span>`
       : '';
 
-    const confClass = `confidence confidence-${data.confidence_level || 'low'}`;
-    const confBadge = data.off_topic ? '' : `<span class="${confClass}">${data.confidence_level || 'low'} confidence</span>`;
+    // Confidence shows only on KB-grounded clinical answers — recall/decision/off-topic
+    // replies send no confidence_level and should read as plain statements.
+    const confBadge = data.confidence_level
+      ? `<span class="confidence confidence-${data.confidence_level}">${data.confidence_level} confidence</span>`
+      : '';
 
     el.innerHTML = `
       <div class="ai-avatar">W</div>
@@ -244,6 +290,45 @@
         <div class="bubble" style="color: var(--danger)">⚠️ ${escHtml(msg)}</div>
       </div>`;
     messagesArea.appendChild(el);
+  }
+
+  // Short title for the sidebar, mirroring the server's titleFromMessage().
+  function sidebarTitle(text) {
+    const clean = String(text).replace(/\s+/g, ' ').trim();
+    return clean.length > 48 ? clean.slice(0, 47).trimEnd() + '…' : clean;
+  }
+
+  const PIN_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"></line><path d="M5 17h14l-1.7-2.5a2 2 0 0 1-.3-1V5a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v8.5a2 2 0 0 1-.3 1L5 17z"></path></svg>';
+  const TRASH_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>';
+
+  // Inject a freshly-created chat into the sidebar so it shows up without a reload.
+  function ensureSidebarEntry(id, title) {
+    const list = document.querySelector('.session-list');
+    if (!list || list.querySelector(`.session-item[data-id="${id}"]`)) return;
+
+    const empty = list.querySelector('.session-empty');
+    if (empty) empty.remove();
+
+    let label = list.querySelector('.session-list-label');
+    if (!label) {
+      label = document.createElement('div');
+      label.className = 'session-list-label';
+      label.textContent = 'Chats';
+      list.prepend(label);
+    }
+
+    list.querySelectorAll('.session-item.active').forEach(el => el.classList.remove('active'));
+
+    const item = document.createElement('div');
+    item.className = 'session-item active';
+    item.dataset.id = id;
+    item.innerHTML =
+      `<a href="/chat?session=${id}" class="session-link" title="${escHtml(title)}">${escHtml(title)}</a>` +
+      '<div class="session-actions">' +
+        `<button type="button" class="session-action pin-btn" title="Pin chat" aria-label="Pin chat">${PIN_SVG}</button>` +
+        `<button type="button" class="session-action delete-btn" title="Delete chat" aria-label="Delete chat">${TRASH_SVG}</button>` +
+      '</div>';
+    label.after(item);
   }
 
   function scrollToBottom() {
