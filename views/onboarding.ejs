@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Your Dog's Profile — Whoof</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="form-page">
+  <header class="top-bar">
+    <div class="top-bar-inner">
+      <span class="brand-small">🐾 Whoof</span>
+      <form method="POST" action="/logout" style="margin:0">
+        <button type="submit" class="btn btn-ghost btn-sm">Log out</button>
+      </form>
+    </div>
+  </header>
+
+  <main class="form-container">
+    <div class="form-header">
+      <h2><span id="page-title"><%= pet?.name ? `${pet.name}'s Profile` : "Tell us about your dog" %></span></h2>
+      <p class="form-subtitle">
+        The vet AI uses this to personalise every answer to your dog's specific situation.
+        You can come back and update it any time.
+      </p>
+    </div>
+
+    <% if (error) { %>
+      <div class="alert alert-error"><%= error %></div>
+    <% } %>
+
+    <form method="POST" action="/onboarding" id="profile-form">
+
+      <!-- Section 1: The basics -->
+      <section class="form-section">
+        <h3>About your dog</h3>
+
+        <div class="field">
+          <label for="name">What's your dog's name? <span class="required">*</span></label>
+          <input type="text" id="name" name="name" required
+                 value="<%= pet?.name || '' %>" placeholder="e.g. Bruno">
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="breed">Breed</label>
+            <input type="text" id="breed" name="breed" list="breed-list" autocomplete="off"
+                   value="<%= pet?.breed || '' %>" placeholder="Start typing…">
+            <datalist id="breed-list">
+              <% breeds.forEach(function(b) { %>
+                <option value="<%= b.breed_name %>">
+              <% }) %>
+            </datalist>
+          </div>
+          <div class="field field-narrow">
+            <label class="checkbox-label">
+              <input type="checkbox" name="is_mixed_breed"
+                     <%= pet?.is_mixed_breed ? 'checked' : '' %>>
+              Mixed breed
+            </label>
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="date_of_birth">Date of birth</label>
+            <input type="date" id="date_of_birth" name="date_of_birth"
+                   value="<%= pet?.date_of_birth ? new Date(pet.date_of_birth).toISOString().split('T')[0] : '' %>">
+          </div>
+          <div class="field">
+            <label for="age_estimated_years">
+              Or estimated age (years)
+              <span class="label-hint">if DOB unknown</span>
+            </label>
+            <input type="number" id="age_estimated_years" name="age_estimated_years"
+                   step="0.5" min="0" max="30"
+                   value="<%= pet?.age_estimated_years ? parseFloat(pet.age_estimated_years) : '' %>" placeholder="e.g. 3.5">
+          </div>
+        </div>
+      </section>
+
+      <!-- Section 2: Health basics -->
+      <section class="form-section">
+        <h3>Health basics</h3>
+
+        <div class="field-row">
+          <div class="field">
+            <label>Sex</label>
+            <div class="radio-group">
+              <label class="radio-label">
+                <input type="radio" name="sex" value="male"
+                       <%= pet?.sex === 'male' ? 'checked' : '' %>> Male
+              </label>
+              <label class="radio-label">
+                <input type="radio" name="sex" value="female"
+                       <%= pet?.sex === 'female' ? 'checked' : '' %>> Female
+              </label>
+            </div>
+          </div>
+          <div class="field field-narrow">
+            <label class="checkbox-label" style="margin-top: 1.6rem">
+              <input type="checkbox" name="neutered"
+                     <%= pet?.neutered ? 'checked' : '' %>>
+              Spayed / neutered
+            </label>
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="weight_kg">Weight (kg)</label>
+            <input type="number" id="weight_kg" name="weight_kg"
+                   step="0.1" min="0" max="200"
+                   value="<%= pet?.weight_kg ? parseFloat(pet.weight_kg) : '' %>" placeholder="e.g. 28.4">
+          </div>
+          <div class="field">
+            <label>Body condition <span class="label-hint">auto-calculated from breed &amp; weight</span></label>
+            <div id="bcs-display" class="bcs-badge bcs-unknown">Enter weight &amp; breed above</div>
+            <input type="hidden" id="body_condition" name="body_condition" value="<%= pet?.body_condition || '' %>">
+          </div>
+        </div>
+      </section>
+
+      <!-- Section 3: Diet & activity -->
+      <section class="form-section">
+        <h3>Diet &amp; activity</h3>
+
+        <div class="field">
+          <label>What does <span class="dog-name-label">your dog</span> eat?
+            <span class="label-hint">add one entry per meal if meals differ</span>
+          </label>
+          <div id="meal-list">
+            <%
+              const mealEntries = (pet?.diet_type || '').split(' | ').filter(Boolean);
+              const initialMeals = mealEntries.length ? mealEntries : [''];
+              initialMeals.forEach(function(m, i) {
+            %>
+            <div class="meal-entry">
+              <span class="meal-label">Meal <%= i + 1 %></span>
+              <input type="text" name="meal_entry" value="<%= m %>"
+                     placeholder="e.g. Royal Canin kibble, home-cooked rice &amp; chicken">
+              <button type="button" class="meal-remove repeat-remove" <%= initialMeals.length === 1 ? 'style="visibility:hidden"' : '' %>>✕</button>
+            </div>
+            <% }) %>
+          </div>
+          <button type="button" id="add-meal" class="repeat-add">+ Add another meal</button>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="meals_per_day">How many meals a day?</label>
+            <input type="number" id="meals_per_day" name="meals_per_day"
+                   min="1" max="10"
+                   value="<%= pet?.meals_per_day || '' %>" placeholder="e.g. 2">
+          </div>
+          <div class="field">
+            <label for="treat_frequency">Treats &amp; snacks outside meals
+              <span class="label-hint">helps estimate extra calories</span>
+            </label>
+            <select id="treat_frequency" name="treat_frequency">
+              <% const treatOpts = ['Never', 'Rarely (special occasions)', 'A few times a week', 'Once a day', 'Several times a day']; %>
+              <option value="">— select —</option>
+              <% treatOpts.forEach(function(o) { %>
+                <option value="<%= o %>" <%= pet?.treat_frequency === o ? 'selected' : '' %>><%= o %></option>
+              <% }) %>
+            </select>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="food_allergies">
+            Any known food allergies or intolerances?
+            <span class="label-hint">comma-separated, e.g. chicken, wheat</span>
+          </label>
+          <input type="text" id="food_allergies" name="food_allergies"
+                 value="<%= (pet?.food_allergies || []).join(', ') %>"
+                 placeholder="chicken, wheat, dairy — or leave blank">
+        </div>
+
+        <div class="field">
+          <label for="baseline_activity_level">
+            How active is <span class="dog-name-label">your dog</span> day-to-day?
+          </label>
+          <select id="baseline_activity_level" name="baseline_activity_level">
+            <%
+              const activityOpts = [
+                'Low — short potty walks, mostly rests indoors',
+                'Moderate — a daily walk or two, some play',
+                'High — long walks daily, active play and fetch',
+                'Very high — working / sporting dog, runs for hours'
+              ];
+            %>
+            <option value="">— select —</option>
+            <% activityOpts.forEach(function(o) { %>
+              <option value="<%= o %>" <%= pet?.baseline_activity_level === o ? 'selected' : '' %>><%= o %></option>
+            <% }) %>
+          </select>
+        </div>
+      </section>
+
+      <!-- Section 4: Medical history -->
+      <section class="form-section">
+        <h3>Medical history</h3>
+
+        <div class="field">
+          <label>Vaccinations
+            <span class="label-hint">pick the vaccine and add the date it was given</span>
+          </label>
+          <div id="vaccine-list">
+            <%
+              // Most common dog vaccines seen on Indian vaccination cards.
+              const VACCINE_OPTIONS = [
+                'Rabies',
+                'DHPPi (Distemper, Hepatitis, Parvo, Parainfluenza)',
+                'DHPPi + L (with Leptospirosis)',
+                'Leptospirosis',
+                'Canine Parvovirus',
+                'Canine Distemper',
+                'Canine Coronavirus',
+                'Kennel Cough (Bordetella)',
+                '9-in-1 combo (Megavac / Vanguard etc.)',
+                'Other (not listed)'
+              ];
+              const vax = (pet?.vaccination_history && Array.isArray(pet.vaccination_history)) ? pet.vaccination_history : [];
+              const initVax = vax.length ? vax : [{ vaccine: '', date: '' }];
+              initVax.forEach(function(v) {
+            %>
+            <div class="vaccine-entry repeat-row">
+              <div class="field">
+                <label>Vaccine</label>
+                <select name="vaccine_name">
+                  <option value="">— select —</option>
+                  <% VACCINE_OPTIONS.forEach(function(o) { %>
+                    <option value="<%= o %>" <%= v.vaccine === o ? 'selected' : '' %>><%= o %></option>
+                  <% }) %>
+                </select>
+              </div>
+              <div class="field">
+                <label>Date given</label>
+                <input type="date" name="vaccine_date" value="<%= v.date || '' %>">
+              </div>
+              <button type="button" class="vaccine-remove repeat-remove" <%= initVax.length === 1 ? 'style="visibility:hidden"' : '' %>>✕</button>
+            </div>
+            <% }) %>
+          </div>
+          <button type="button" id="add-vaccine" class="repeat-add">+ Add another vaccine</button>
+        </div>
+
+        <div class="field">
+          <label for="known_medications_text">
+            Is <span class="dog-name-label">your dog</span> on any medications currently?
+          </label>
+          <textarea id="known_medications_text" name="known_medications_text" rows="2"
+                    placeholder="e.g. Heartgard monthly for heartworm; Apoquel for allergies"><%= pet?.known_medications?.notes || pet?.known_medications?.description || '' %></textarea>
+        </div>
+
+        <div class="field">
+          <label for="known_drug_reactions">
+            Has <span class="dog-name-label">your dog</span> ever had a bad reaction to a medication?
+          </label>
+          <input type="text" id="known_drug_reactions" name="known_drug_reactions"
+                 value="<%= pet?.known_drug_reactions || '' %>"
+                 placeholder="e.g. vomiting after amoxicillin — or leave blank">
+        </div>
+
+        <!-- Surgery / major procedures -->
+        <div class="field">
+          <label>Has <span class="dog-name-label">your dog</span> had any surgeries or serious procedures?</label>
+          <div class="radio-group">
+            <label class="radio-label">
+              <input type="radio" name="has_surgery" value="no"
+                     <%= (!pet?.past_surgeries?.length) ? 'checked' : '' %>> No
+            </label>
+            <label class="radio-label">
+              <input type="radio" name="has_surgery" value="yes"
+                     <%= (pet?.past_surgeries?.length) ? 'checked' : '' %>> Yes
+            </label>
+          </div>
+        </div>
+
+        <div id="surgery-section" style="display:<%= (pet?.past_surgeries?.length) ? 'block' : 'none' %>">
+          <div id="surgery-list">
+            <%
+              const surgeries = pet?.past_surgeries || [];
+              const initSurgeries = surgeries.length ? surgeries : [{ description: '', date: '' }];
+              initSurgeries.forEach(function(s, i) {
+            %>
+            <div class="surgery-entry repeat-row">
+              <div class="field">
+                <label>Procedure / surgery description</label>
+                <input type="text" name="surgery_desc" value="<%= s.description || '' %>"
+                       placeholder="e.g. splenectomy, TPLO for knee, tumour removal">
+              </div>
+              <div class="field">
+                <label>Date (approx.)</label>
+                <input type="date" name="surgery_date" value="<%= s.date || '' %>">
+              </div>
+              <button type="button" class="surgery-remove repeat-remove" <%= initSurgeries.length === 1 ? 'style="visibility:hidden"' : '' %>>✕</button>
+            </div>
+            <% }) %>
+          </div>
+          <button type="button" id="add-surgery" class="repeat-add">+ Add another procedure</button>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="last_vet_visit_date">Last vet visit</label>
+            <input type="date" id="last_vet_visit_date" name="last_vet_visit_date"
+                   value="<%= pet?.last_vet_visit_date ? new Date(pet.last_vet_visit_date).toISOString().split('T')[0] : '' %>">
+          </div>
+          <div class="field">
+            <label for="last_vet_visit_reason">Reason for visit</label>
+            <input type="text" id="last_vet_visit_reason" name="last_vet_visit_reason"
+                   value="<%= pet?.last_vet_visit_reason || '' %>"
+                   placeholder="e.g. annual checkup and vaccines">
+          </div>
+        </div>
+      </section>
+
+      <!-- Section 5: Home & temperament -->
+      <section class="form-section">
+        <h3>Home &amp; temperament</h3>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="living_situation">Where does <span class="dog-name-label">your dog</span> mostly live?</label>
+            <select id="living_situation" name="living_situation">
+              <option value="">— select —</option>
+              <option value="indoor" <%= pet?.living_situation === 'indoor' ? 'selected' : '' %>>Indoors</option>
+              <option value="outdoor" <%= pet?.living_situation === 'outdoor' ? 'selected' : '' %>>Outdoors</option>
+              <option value="mixed" <%= pet?.living_situation === 'mixed' ? 'selected' : '' %>>Mix of both</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="region">City / state (India)</label>
+            <input type="text" id="region" name="region"
+                   value="<%= pet?.region || '' %>"
+                   placeholder="e.g. Bengaluru, Karnataka">
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="temperament_flags">
+            How would you describe <span class="dog-name-label">your dog</span>'s personality?
+            <span class="label-hint">comma-separated, e.g. friendly, anxious, food-motivated</span>
+          </label>
+          <input type="text" id="temperament_flags" name="temperament_flags"
+                 value="<%= (pet?.temperament_flags || []).join(', ') %>"
+                 placeholder="friendly, energetic, anxious around strangers">
+        </div>
+
+        <div class="field">
+          <label for="known_phobias">
+            Is <span class="dog-name-label">your dog</span> scared of anything in particular?
+          </label>
+          <input type="text" id="known_phobias" name="known_phobias"
+                 value="<%= pet?.known_phobias || '' %>"
+                 placeholder="e.g. thunderstorms, firecrackers, strangers">
+        </div>
+
+        <div class="field-row field-row-checks">
+          <label class="checkbox-label">
+            <input type="checkbox" name="other_animals_in_household"
+                   <%= pet?.other_animals_in_household ? 'checked' : '' %>>
+            Other pets in the household
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" name="household_has_children"
+                   <%= pet?.household_has_children ? 'checked' : '' %>>
+            Children in the household
+          </label>
+        </div>
+      </section>
+
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary btn-lg">
+          Save &amp; go to chat →
+        </button>
+        <% if (pet?.name) { %>
+          <a href="/chat" class="btn btn-ghost">Cancel</a>
+        <% } %>
+      </div>
+    </form>
+  </main>
+
+  <style>
+    /* Body condition badge */
+    .bcs-badge {
+      display: inline-flex; align-items: center; gap: .4rem;
+      padding: .5rem .9rem; border-radius: 8px;
+      font-size: .92rem; font-weight: 600; min-height: 38px;
+      border: 1.5px solid var(--border);
+    }
+    .bcs-unknown  { background: #f5f7f9; color: var(--text-muted); }
+    .bcs-ideal    { background: #E8F5E9; color: #2E7D32; border-color: #A5D6A7; }
+    .bcs-underweight { background: #FFF3E0; color: #E65100; border-color: #FFCC80; }
+    .bcs-overweight  { background: #FFEBEE; color: #C62828; border-color: #FFCDD2; }
+
+    /* Multi-meal list (single input per row) */
+    .meal-entry { display: flex; align-items: center; gap: .6rem; margin-bottom: .55rem; }
+    .meal-label { font-size: .85rem; color: var(--text-muted); white-space: nowrap; min-width: 48px; }
+    .meal-entry input { flex: 1; padding: .55rem .8rem; border: 1.5px solid var(--border); border-radius: 8px; font: inherit; font-size: .95rem; background: var(--white); }
+    .meal-entry input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(27,107,125,.12); }
+
+    /* Two-field repeatable rows (vaccines, surgeries) — aligned grid */
+    .repeat-row {
+      display: grid; grid-template-columns: 1fr 168px 40px;
+      gap: .75rem; align-items: end; margin-bottom: .6rem;
+    }
+    .repeat-row .field { margin: 0; }
+
+    /* Square remove button — shared by meals, vaccines, surgeries */
+    .repeat-remove {
+      width: 40px; height: 40px; padding: 0; flex-shrink: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      border: 1.5px solid var(--border); border-radius: 8px;
+      background: var(--white); color: var(--text-muted);
+      cursor: pointer; font-size: 1rem; line-height: 1; transition: all .12s ease;
+    }
+    .repeat-remove:hover { border-color: var(--danger); color: var(--danger); background: var(--danger-bg); }
+
+    /* Dashed "add" button — shared */
+    .repeat-add {
+      display: block; width: 100%; margin-top: .35rem;
+      background: transparent; border: 1.5px dashed var(--border); border-radius: 8px;
+      color: var(--primary); font: inherit; font-size: .85rem; font-weight: 500;
+      padding: .55rem; cursor: pointer; transition: all .12s ease;
+    }
+    .repeat-add:hover { border-color: var(--primary); background: var(--primary-light); }
+
+    @media (max-width: 640px) {
+      .repeat-row { grid-template-columns: 1fr 40px; }
+      .repeat-row > .field { grid-column: 1; }
+      .repeat-row > .repeat-remove { grid-column: 2; grid-row: 1; align-self: end; }
+    }
+  </style>
+
+  <script>
+    // ── Dog name label sync ──────────────────────────────────────────────────
+    const nameInput = document.getElementById('name');
+    const spans = document.querySelectorAll('.dog-name-label');
+    const pageTitle = document.getElementById('page-title');
+    function updateName() {
+      const n = nameInput.value.trim() || 'your dog';
+      spans.forEach(s => { s.textContent = n; });
+      pageTitle.textContent = nameInput.value.trim()
+        ? `${nameInput.value.trim()}'s Profile`
+        : 'Tell us about your dog';
+    }
+    nameInput.addEventListener('input', updateName);
+    updateName();
+
+    // ── Body condition auto-calculator ───────────────────────────────────────
+    // Breed weight ranges from the DB, passed in as JSON.
+    const BREED_RANGES = <%- JSON.stringify(
+      breeds.reduce((acc, b) => {
+        if (b.weight_range_kg && b.weight_range_kg !== 'varies') {
+          const m = b.weight_range_kg.match(/(\d+[\d.]*)[–\-](\d+[\d.]*)/);
+          if (m) acc[b.breed_name] = { min: parseFloat(m[1]), max: parseFloat(m[2]) };
+        }
+        return acc;
+      }, {})
+    ) %>;
+
+    const breedInput   = document.getElementById('breed');
+    const weightInput  = document.getElementById('weight_kg');
+    const bcsDisplay   = document.getElementById('bcs-display');
+    const bcsHidden    = document.getElementById('body_condition');
+
+    function computeBCS() {
+      const breed  = breedInput.value.trim();
+      const weight = parseFloat(weightInput.value);
+      const range  = BREED_RANGES[breed];
+
+      if (!range || isNaN(weight) || weight <= 0) {
+        bcsDisplay.className = 'bcs-badge bcs-unknown';
+        bcsDisplay.textContent = 'Enter weight & breed above';
+        bcsHidden.value = '';
+        return;
+      }
+
+      let condition, label, icon;
+      if (weight < range.min * 0.88) {
+        condition = 'underweight'; label = 'Underweight'; icon = '⚠️';
+      } else if (weight > range.max * 1.12) {
+        condition = 'overweight'; label = 'Overweight'; icon = '⚠️';
+      } else {
+        condition = 'ideal'; label = 'Ideal weight'; icon = '✓';
+      }
+
+      bcsDisplay.className = `bcs-badge bcs-${condition}`;
+      bcsDisplay.textContent = `${icon} ${label} for a ${breed} (breed range: ${range.min}–${range.max} kg)`;
+      bcsHidden.value = condition;
+    }
+
+    breedInput.addEventListener('input', computeBCS);
+    weightInput.addEventListener('input', computeBCS);
+    computeBCS(); // run on load for edit mode
+
+    // ── Multi-meal diet ──────────────────────────────────────────────────────
+    const mealList = document.getElementById('meal-list');
+
+    function refreshMealLabels() {
+      mealList.querySelectorAll('.meal-entry').forEach((row, i) => {
+        row.querySelector('.meal-label').textContent = `Meal ${i + 1}`;
+        const rmBtn = row.querySelector('.meal-remove');
+        rmBtn.style.visibility = mealList.children.length === 1 ? 'hidden' : 'visible';
+      });
+    }
+
+    document.getElementById('add-meal').addEventListener('click', () => {
+      const count = mealList.children.length + 1;
+      const div = document.createElement('div');
+      div.className = 'meal-entry';
+      div.innerHTML = `
+        <span class="meal-label">Meal ${count}</span>
+        <input type="text" name="meal_entry" placeholder="e.g. home-cooked rice &amp; chicken">
+        <button type="button" class="meal-remove repeat-remove">✕</button>`;
+      mealList.appendChild(div);
+      div.querySelector('.meal-remove').addEventListener('click', removeMeal);
+      refreshMealLabels();
+      div.querySelector('input').focus();
+    });
+
+    function removeMeal() {
+      this.closest('.meal-entry').remove();
+      refreshMealLabels();
+    }
+    mealList.querySelectorAll('.meal-remove').forEach(b => b.addEventListener('click', removeMeal));
+
+    // ── Surgery section ──────────────────────────────────────────────────────
+    const surgerySection = document.getElementById('surgery-section');
+    const surgeryList    = document.getElementById('surgery-list');
+
+    document.querySelectorAll('input[name="has_surgery"]').forEach(radio => {
+      radio.addEventListener('change', function () {
+        surgerySection.style.display = this.value === 'yes' ? 'block' : 'none';
+      });
+    });
+
+    function refreshSurgeryRemoveBtns() {
+      const rows = surgeryList.querySelectorAll('.surgery-entry');
+      rows.forEach(row => {
+        row.querySelector('.surgery-remove').style.visibility = rows.length === 1 ? 'hidden' : 'visible';
+      });
+    }
+
+    document.getElementById('add-surgery').addEventListener('click', () => {
+      const div = document.createElement('div');
+      div.className = 'surgery-entry repeat-row';
+      div.innerHTML = `
+        <div class="field">
+          <label>Procedure / surgery description</label>
+          <input type="text" name="surgery_desc" placeholder="e.g. splenectomy, TPLO for knee, tumour removal">
+        </div>
+        <div class="field">
+          <label>Date (approx.)</label>
+          <input type="date" name="surgery_date">
+        </div>
+        <button type="button" class="surgery-remove repeat-remove">✕</button>`;
+      surgeryList.appendChild(div);
+      div.querySelector('.surgery-remove').addEventListener('click', removeSurgery);
+      refreshSurgeryRemoveBtns();
+      div.querySelector('input').focus();
+    });
+
+    function removeSurgery() {
+      this.closest('.surgery-entry').remove();
+      refreshSurgeryRemoveBtns();
+    }
+    surgeryList.querySelectorAll('.surgery-remove').forEach(b => b.addEventListener('click', removeSurgery));
+
+    // ── Vaccinations ─────────────────────────────────────────────────────────
+    const vaccineList = document.getElementById('vaccine-list');
+
+    function refreshVaccineRemoveBtns() {
+      const rows = vaccineList.querySelectorAll('.vaccine-entry');
+      rows.forEach(row => {
+        row.querySelector('.vaccine-remove').style.visibility = rows.length === 1 ? 'hidden' : 'visible';
+      });
+    }
+
+    document.getElementById('add-vaccine').addEventListener('click', () => {
+      // Clone the first row so the full vaccine option list comes along, then reset it.
+      const clone = vaccineList.querySelector('.vaccine-entry').cloneNode(true);
+      clone.querySelector('select').value = '';
+      clone.querySelector('input[type="date"]').value = '';
+      clone.querySelector('.vaccine-remove').style.visibility = 'visible';
+      clone.querySelector('.vaccine-remove').addEventListener('click', removeVaccine);
+      vaccineList.appendChild(clone);
+      refreshVaccineRemoveBtns();
+      clone.querySelector('select').focus();
+    });
+
+    function removeVaccine() {
+      this.closest('.vaccine-entry').remove();
+      refreshVaccineRemoveBtns();
+    }
+    vaccineList.querySelectorAll('.vaccine-remove').forEach(b => b.addEventListener('click', removeVaccine));
+  </script>
+</body>
+</html>

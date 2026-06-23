@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= pet.name %> — Whoof Vet AI</title>
+  <link rel="stylesheet" href="/style.css">
+  <!-- marked.js for rendering markdown in AI responses -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
+</head>
+<body class="chat-page">
+
+  <header class="chat-header">
+    <div class="chat-header-inner">
+      <div class="chat-header-left">
+        <span class="brand-small">🐾 Whoof</span>
+        <span class="chat-pet-name">Asking about <strong><%= pet.name %></strong></span>
+      </div>
+      <div class="chat-header-right">
+        <a href="/onboarding" class="btn btn-ghost btn-sm">Edit profile</a>
+        <form method="POST" action="/logout" style="margin:0">
+          <button type="submit" class="btn btn-ghost btn-sm">Log out</button>
+        </form>
+      </div>
+    </div>
+  </header>
+
+  <div class="chat-layout">
+    <div class="messages-area" id="messages-area">
+
+      <!-- System welcome message -->
+      <div class="message ai-message">
+        <div class="ai-avatar">W</div>
+        <div class="bubble-wrap">
+          <div class="bubble">
+            Hello! I'm Whoof AI. I've reviewed <strong><%= pet.name %></strong>'s profile.
+            Ask me anything about <%= pet.name %>'s health — diet questions, symptoms you're worried about,
+            vaccination queries, anything at all. What's on your mind?
+          </div>
+          <div class="meta">Whoof Vet AI</div>
+        </div>
+      </div>
+
+      <!-- Existing conversation history -->
+      <% history.forEach(function(msg) { %>
+        <div class="message user-message">
+          <div class="bubble-wrap">
+            <div class="bubble"><%= msg.owner_question %></div>
+            <div class="meta"><%= new Date(msg.created_at).toLocaleString('en-IN', {dateStyle:'medium', timeStyle:'short'}) %></div>
+          </div>
+        </div>
+
+        <div class="message ai-message <%= msg.escalated ? 'emergency' : '' %>">
+          <div class="ai-avatar">W</div>
+          <div class="bubble-wrap">
+            <% if (msg.escalated) { %>
+              <div class="emergency-banner">⚠️ URGENT — See a vet or emergency clinic now</div>
+            <% } %>
+            <div class="bubble markdown-content"><%= msg.answer_summary %></div>
+            <% if (msg.sources_cited && msg.sources_cited.length) { %>
+              <details class="sources">
+                <summary>Sources (<%= msg.sources_cited.length %>)</summary>
+                <ul>
+                  <% msg.sources_cited.forEach(function(s) { %>
+                    <li><strong><%= s.source %></strong><% if (s.topic) { %> — <%= s.topic %><% } %></li>
+                  <% }) %>
+                </ul>
+              </details>
+            <% } %>
+            <div class="meta">
+              <span class="confidence confidence-<%= msg.confidence_level %>"><%= msg.confidence_level %> confidence</span>
+            </div>
+          </div>
+        </div>
+      <% }) %>
+
+    </div><!-- /messages-area -->
+
+    <div class="input-area">
+      <div class="input-wrap">
+        <textarea
+          id="message-input"
+          placeholder="Ask Whoof AI about <%= pet.name %>…"
+          rows="1"
+          autofocus
+        ></textarea>
+        <button id="send-btn" class="btn btn-primary send-btn" aria-label="Send">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+        </button>
+      </div>
+      <p class="input-disclaimer">
+        Whoof AI is not a licensed vet. For emergencies, contact a vet immediately.
+      </p>
+    </div>
+  </div>
+
+  <script src="/chat-client.js"></script>
+  <script>
+    // Render existing history messages as markdown
+    document.querySelectorAll('.markdown-content').forEach(el => {
+      el.innerHTML = marked.parse(el.textContent || '');
+    });
+    // Scroll to bottom on load
+    const ma = document.getElementById('messages-area');
+    ma.scrollTop = ma.scrollHeight;
+  </script>
+</body>
+</html>

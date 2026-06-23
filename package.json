@@ -1,0 +1,33 @@
+{
+  "name": "whoof-vet-ai-db",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Whoof Vet AI — data layer (Postgres + pgvector). V0 scope: schema, migrations, and a DB health check only. No LLM/RAG logic yet.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "migrate": "node-pg-migrate",
+    "migrate:up": "node-pg-migrate up",
+    "migrate:down": "node-pg-migrate down",
+    "migrate:redo": "node-pg-migrate redo",
+    "migrate:create": "node-pg-migrate create",
+    "seed": "node seed.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.105.0",
+    "@xenova/transformers": "^2.17.2",
+    "bcryptjs": "^3.0.3",
+    "connect-pg-simple": "^10.0.0",
+    "dotenv": "^17.4.2",
+    "ejs": "^6.0.1",
+    "express": "^5.2.1",
+    "express-session": "^1.19.0",
+    "node-pg-migrate": "^8.0.4",
+    "pg": "^8.22.0"
+  }
+}

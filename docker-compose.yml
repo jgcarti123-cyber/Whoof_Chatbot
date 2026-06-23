@@ -1,0 +1,26 @@
+# Local Postgres + pgvector. No manual Postgres install needed:
+#   docker compose up -d
+# Brings up Postgres 16 with the pgvector extension available (the migration in
+# migrations/*_enable-extensions.js runs `CREATE EXTENSION IF NOT EXISTS vector`).
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: whoof-vet-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: whoof
+      POSTGRES_PASSWORD: whoof
+      POSTGRES_DB: whoof_vet
+    ports:
+      - "5432:5432"
+    volumes:
+      - whoof_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # Compose-level readiness: `docker compose ps` shows healthy once PG accepts connections.
+      test: ["CMD-SHELL", "pg_isready -U whoof -d whoof_vet"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  whoof_pgdata:

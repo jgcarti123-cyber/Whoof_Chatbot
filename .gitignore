@@ -1,0 +1,14 @@
+node_modules/
+.env
+npm-debug.log*
+*.log
+.DS_Store
+
+# Large PDF source files — ingest locally, don't commit to git
+kb-source/*.pdf
+
+# Claude Code session data
+.claude/
+
+# Local PDF hash tracker (contains absolute machine paths, not portable)
+scripts/.pdf-hashes.json
