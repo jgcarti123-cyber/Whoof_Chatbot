@@ -10,10 +10,29 @@
   let sessionId = window.__SESSION_ID__ || null;
   const petName = window.__PET_NAME__ || 'your dog';
 
+  // Leading slash-commands that force a response format. Mirrors the server's list
+  // (routes/chat.js). Add more here to extend the slash menu + override behaviour.
+  const FORMAT_COMMANDS = [
+    { name: 'visualise', aliases: ['visualise', 'visualize'], modality: 'structured',
+      hint: 'Lay the answer out as a structured card' },
+  ];
+  // Returns { modality, cleaned }: the forced modality (or null) and the message with a
+  // leading command word stripped, so the bubble + stored question read naturally.
+  function parseFormatCommand(text) {
+    const m = (text || '').match(/^\/([a-z]+)\b[ \t]*/i);
+    if (m) {
+      const word = m[1].toLowerCase();
+      const cmd = FORMAT_COMMANDS.find(c => c.aliases.indexOf(word) !== -1);
+      if (cmd) return { modality: cmd.modality, cleaned: text.slice(m[0].length).trim() };
+    }
+    return { modality: null, cleaned: (text || '').trim() };
+  }
+
   // Auto-grow textarea
   input.addEventListener('input', function () {
     this.style.height = 'auto';
     this.style.height = Math.min(this.scrollHeight, 160) + 'px';
+    updateSlashHint();
   });
 
   // Send on Enter (Shift+Enter for newline)
@@ -25,6 +44,64 @@
   });
 
   sendBtn.addEventListener('click', sendFromInput);
+
+  // ── Slash-command hint ─────────────────────────────────────────────────────
+  // Typing "/vis" surfaces a small menu suggesting /visualise, so the override is
+  // discoverable. Purely additive — it never intercepts Enter or the send flow.
+  const inputArea = document.querySelector('.input-area');
+  const slashHint = document.createElement('div');
+  slashHint.className = 'slash-hint';
+  slashHint.hidden = true;
+  if (inputArea) inputArea.appendChild(slashHint);
+
+  function hideSlashHint() {
+    slashHint.hidden = true;
+    slashHint.innerHTML = '';
+  }
+
+  // Bare "/visualise" sent with no request: keep the command in the box (caret at the
+  // end) and prompt for detail rather than firing an empty command at the model. The
+  // nudge clears itself as soon as they start typing (updateSlashHint runs on input).
+  function showSlashNudge(raw) {
+    const base = raw + ' ';
+    input.value = base;
+    input.focus();
+    try { input.setSelectionRange(base.length, base.length); } catch (e) {}
+    slashHint.innerHTML =
+      '<div class="slash-hint-nudge">Add what you’d like laid out — e.g. ' +
+      '<strong>/visualise a plan to teach Monkey to sit</strong></div>';
+    slashHint.hidden = false;
+  }
+
+  // Show suggestions only while the whole input is a partial slash token ("/", "/v",
+  // "/visu") — i.e. before any space, so it never covers a real question.
+  function updateSlashHint() {
+    const m = input.value.match(/^\/([a-z]*)$/i);
+    if (!m) { hideSlashHint(); return; }
+    const typed = m[1].toLowerCase();
+    const matches = FORMAT_COMMANDS.filter(c => c.aliases.some(a => a.indexOf(typed) === 0));
+    if (!matches.length) { hideSlashHint(); return; }
+    slashHint.innerHTML = matches.map(c =>
+      '<button type="button" class="slash-hint-item" data-insert="/' + c.name + ' ">' +
+        '<span class="slash-hint-cmd">/' + escHtml(c.name) + '</span>' +
+        '<span class="slash-hint-desc">' + escHtml(c.hint) + '</span>' +
+      '</button>').join('');
+    slashHint.hidden = false;
+  }
+
+  // mousedown (not click) so it fires before the input's blur tears the menu down.
+  slashHint.addEventListener('mousedown', function (e) {
+    const item = e.target.closest('.slash-hint-item');
+    if (!item) return;
+    e.preventDefault();
+    input.value = item.getAttribute('data-insert');
+    hideSlashHint();
+    input.focus();
+  });
+  input.addEventListener('blur', function () { setTimeout(hideSlashHint, 120); });
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !slashHint.hidden) hideSlashHint();
+  });
 
   // ── Sidebar chat actions (pin / delete) ───────────────────────────────────
   // Delegated so it also covers chats injected after a new conversation starts.
@@ -70,20 +147,31 @@
   });
 
   function sendFromInput() {
-    const text = input.value.trim();
-    if (!text) return;
+    const raw = input.value.trim();
+    if (!raw) return;
+    // A "/visualise <question>" command forces a structured card; strip the command
+    // so the bubble shows just the question.
+    const cmd = parseFormatCommand(raw);
+    // Bare "/visualise" with no request after it: don't send an empty command to the
+    // model — hold the text in the box and nudge for detail instead.
+    if (cmd.modality && !cmd.cleaned) { showSlashNudge(raw); return; }
     input.value = '';
     input.style.height = 'auto';
+    hideSlashHint();
+    const forceStructured = cmd.modality === 'structured' && cmd.cleaned.length > 0;
+    const text = forceStructured ? cmd.cleaned : raw;
     // First message of a brand-new chat clears the hero so messages take over.
     const hero = messagesArea.querySelector('.empty-hero');
     if (hero) hero.remove();
     appendUserMessage(text);
-    postMessage(text, []);
+    postMessage(text, [], { forceStructured });
   }
 
   // Core request. `clarifications` is [] on a first ask, or the owner's triage
-  // answers on the follow-up round.
-  function postMessage(text, clarifications) {
+  // answers on the follow-up round. `opts.forceStructured` carries a /visualise
+  // override through both rounds so a clarified answer still renders as a card.
+  function postMessage(text, clarifications, opts) {
+    opts = opts || {};
     sendBtn.disabled = true;
     const typingEl = appendTypingIndicator();
     scrollToBottom();
@@ -91,7 +179,10 @@
     fetch('/api/chat/message', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text, clarifications, session_id: sessionId }),
+      body: JSON.stringify({
+        message: text, clarifications, session_id: sessionId,
+        force_structured: opts.forceStructured === true ? true : undefined,
+      }),
     })
       .then(r => r.json())
       .then(data => {
@@ -106,7 +197,7 @@
         if (data.error) {
           appendErrorMessage(data.error);
         } else if (data.needs_clarification) {
-          appendClarification(data.original_message || text, data.clarifying_questions || []);
+          appendClarification(data.original_message || text, data.clarifying_questions || [], opts);
         } else {
           appendAIMessage(data);
         }
@@ -153,7 +244,8 @@
   // ── Clarifying-question card ──────────────────────────────────────────────
   // Renders Whoof AI's triage questions as selectable option chips plus an
   // optional free-text field per question (AskUserQuestion-style), then a submit.
-  function appendClarification(originalMessage, questions) {
+  function appendClarification(originalMessage, questions, opts) {
+    opts = opts || {};
     const el = document.createElement('div');
     el.className = 'message ai-message';
 
@@ -241,7 +333,7 @@
       const summary = answers.map(a => `${a.question} ${a.answer}`).join(' · ');
       appendUserMessage(summary);
 
-      postMessage(originalMessage, answers);
+      postMessage(originalMessage, answers, opts);
       scrollToBottom();
     });
   }
@@ -281,7 +373,7 @@
       <div class="ai-avatar">W</div>
       <div class="bubble-wrap">
         ${emergencyBanner}
-        <div class="bubble markdown-content"></div>
+        <div class="ai-content"></div>
         ${sourcesHtml}
         <div class="meta">
           ${confBadge}
@@ -290,8 +382,16 @@
         </div>
       </div>`;
 
-    const bubbleEl = el.querySelector('.bubble');
-    bubbleEl.innerHTML = marked.parse(data.answer || '');
+    // Body: a structured card when the model returned one, otherwise a markdown bubble.
+    const contentEl = el.querySelector('.ai-content');
+    if (data.structured_answer) {
+      contentEl.appendChild(renderStructuredAnswer(data.structured_answer));
+    } else {
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble markdown-content';
+      bubble.innerHTML = marked.parse(data.answer || '');
+      contentEl.appendChild(bubble);
+    }
 
     messagesArea.appendChild(el);
 
@@ -300,6 +400,214 @@
       const card = buildDecisionCard(data.offer_title, data.offer_type, data.offer_summary);
       el.querySelector('.bubble-wrap').appendChild(card);
     }
+  }
+
+  // ── Structured answer card ────────────────────────────────────────────────
+  // One generic renderer for the StructuredAnswer schema (lib/structured.js). Driven
+  // entirely by data — no per-kind components. Any block that's absent simply isn't
+  // rendered, so a header-plus-one-stat answer works as well as a dense multi-section one.
+  function renderStructuredAnswer(ans) {
+    const card = document.createElement('div');
+    card.className = 'structured-card';
+    if (!ans || !ans.header) {
+      card.textContent = (ans && ans.fallbackText) || '';
+      return card;
+    }
+
+    // Header — avatar + title + optional subject meta
+    const meta = ans.subject && ans.subject.meta ? ans.subject.meta : '';
+    const headIcon = (ans.header && ans.header.icon) || (ans.subject && ans.subject.avatarIcon) || 'paw';
+    card.appendChild(elFromHtml(
+      '<div class="sc-header">' +
+        '<span class="sc-avatar">' + iconSvg(headIcon) + '</span>' +
+        '<div class="sc-headtext">' +
+          '<div class="sc-title">' + escHtml(ans.header.title) + '</div>' +
+          (meta ? '<div class="sc-sub">' + escHtml(meta) + '</div>' : '') +
+        '</div>' +
+      '</div>'));
+
+    // Stats grid
+    if (Array.isArray(ans.stats) && ans.stats.length) {
+      const grid = document.createElement('div');
+      grid.className = 'sc-stats';
+      ans.stats.slice(0, 4).forEach(function (s) {
+        grid.appendChild(elFromHtml(
+          '<div class="sc-stat">' +
+            '<div class="sc-stat-val">' + escHtml(s.value) + (s.unit ? ' <span class="sc-stat-unit">' + escHtml(s.unit) + '</span>' : '') + '</div>' +
+            '<div class="sc-stat-label">' + escHtml(s.label) + '</div>' +
+          '</div>'));
+      });
+      card.appendChild(grid);
+    }
+
+    // Sections
+    (ans.sections || []).forEach(function (sec) { card.appendChild(renderSection(sec)); });
+
+    // Callouts
+    (ans.callouts || []).forEach(function (c) {
+      card.appendChild(elFromHtml(
+        '<div class="sc-callout sc-callout-' + (c.tone || 'info') + '">' +
+          '<span class="sc-callout-icon">' + iconSvg(c.icon || c.tone || 'info') + '</span>' +
+          '<div class="sc-callout-text">' +
+            '<div class="sc-callout-title">' + escHtml(c.title) + '</div>' +
+            '<div class="sc-callout-body">' + escHtml(c.body) + '</div>' +
+          '</div>' +
+        '</div>'));
+    });
+
+    // Tags
+    if (Array.isArray(ans.tags) && ans.tags.length) {
+      const row = document.createElement('div');
+      row.className = 'sc-tags';
+      ans.tags.forEach(function (t) {
+        row.appendChild(elFromHtml('<span class="sc-tag">' + escHtml(t.label) + '</span>'));
+      });
+      card.appendChild(row);
+    }
+
+    // Actions
+    if (Array.isArray(ans.actions) && ans.actions.length) {
+      card.appendChild(renderActions(ans.actions));
+    }
+
+    return card;
+  }
+
+  function renderSection(sec) {
+    const wrap = document.createElement('div');
+    wrap.className = 'sc-section';
+    wrap.appendChild(elFromHtml('<div class="sc-section-heading">' + escHtml(sec.heading) + '</div>'));
+
+    if (sec.layout === 'timeline') {
+      const list = document.createElement('div');
+      list.className = 'sc-timeline';
+      (sec.items || []).forEach(function (it) {
+        const details = (it.details || []).map(function (d) {
+          return '<li>' + escHtml(d) + '</li>';
+        }).join('');
+        list.appendChild(elFromHtml(
+          '<div class="sc-tl-item">' +
+            '<span class="sc-tl-dot">' + (it.icon ? iconSvg(it.icon) : '') + '</span>' +
+            '<div class="sc-tl-body">' +
+              '<div class="sc-tl-label">' + escHtml(it.label) + '</div>' +
+              (details ? '<ul class="sc-tl-details">' + details + '</ul>' : '') +
+            '</div>' +
+          '</div>'));
+      });
+      wrap.appendChild(list);
+    } else {
+      // 'list' (default)
+      const list = document.createElement('ul');
+      list.className = 'sc-list';
+      (sec.items || []).forEach(function (it) {
+        list.appendChild(elFromHtml(
+          '<li class="sc-list-item">' +
+            '<span class="sc-list-label">' + escHtml(it.label) + '</span>' +
+            (it.detail ? '<span class="sc-list-detail">' + escHtml(it.detail) + '</span>' : '') +
+          '</li>'));
+      });
+      wrap.appendChild(list);
+    }
+    return wrap;
+  }
+
+  // ── Action registry ───────────────────────────────────────────────────────
+  // type → handler. Two real, wired actions today (save_decision, open_screen); the
+  // rest render disabled with a "coming soon" state instead of silently failing.
+  const ACTION_HANDLERS = {
+    save_decision: { wired: true, run: runSaveDecision },
+    open_screen: { wired: true, run: runOpenScreen },
+    set_reminder: { wired: false },
+    log_event: { wired: false },
+  };
+
+  function renderActions(actions) {
+    const row = document.createElement('div');
+    row.className = 'sc-actions';
+    actions.forEach(function (a) {
+      const handler = ACTION_HANDLERS[a.type];
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'sc-action-btn';
+      btn.innerHTML = (a.icon ? '<span class="sc-action-icon">' + iconSvg(a.icon) + '</span>' : '') + escHtml(a.label);
+      if (!handler || !handler.wired) {
+        btn.disabled = true;
+        btn.classList.add('sc-action-soon');
+        btn.title = 'Coming soon';
+        btn.innerHTML += ' <span class="sc-soon">soon</span>';
+      } else {
+        btn.addEventListener('click', function () { handler.run(a.payload || {}, btn, row); });
+      }
+      row.appendChild(btn);
+    });
+    return row;
+  }
+
+  function runSaveDecision(payload, btn, row) {
+    if (!sessionId) return;
+    Array.prototype.forEach.call(row.querySelectorAll('button'), function (b) { b.disabled = true; });
+    const original = btn.innerHTML;
+    btn.textContent = 'Saving…';
+    fetch('/api/chat/session/' + sessionId + '/decision/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: payload.title || 'Saved plan',
+        decision_type: payload.decision_type || 'other',
+        summary: payload.summary || '',
+      }),
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (result) {
+        if (result.ok) {
+          const done = document.createElement('div');
+          done.className = 'sc-action-saved';
+          done.innerHTML = '<span class="doc-success-icon">&#10003;</span> Saved to ' + escHtml(petName) + '’s record';
+          row.replaceWith(done);
+        } else {
+          btn.innerHTML = original;
+          Array.prototype.forEach.call(row.querySelectorAll('button'), function (b) { b.disabled = false; });
+        }
+      })
+      .catch(function () {
+        btn.innerHTML = original;
+        Array.prototype.forEach.call(row.querySelectorAll('button'), function (b) { b.disabled = false; });
+      });
+  }
+
+  function runOpenScreen(payload) {
+    const screen = (payload && payload.screen) || 'profile';
+    window.location.href = screen === 'chat' ? '/chat' : '/onboarding';
+  }
+
+  // ── Tiny inline-icon set (keys come from the model; unknown → a neutral dot) ──
+  const ICONS = {
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4 12H2M22 12h-2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>',
+    moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/>',
+    bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>',
+    clipboard: '<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M9 14l2 2 4-4"/>',
+    'clipboard-check': '<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M9 14l2 2 4-4"/>',
+    stethoscope: '<path d="M4 3v5a4 4 0 0 0 8 0V3"/><path d="M8 15a5 5 0 0 0 10 0v-2"/><circle cx="18" cy="11" r="2"/>',
+    activity: '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>',
+    calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+    heart: '<path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8z"/>',
+    shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+    bone: '<path d="M17 10c1.5 0 3-1 3-3s-1.5-3-3-3-2.5 1.5-3 2H9c-.5-.5-1.5-2-3-2S3 5.5 3 7s1.5 3 3 3"/><path d="M17 14c1.5 0 3 1 3 3s-1.5 3-3 3-2.5-1.5-3-2H9c-.5.5-1.5 2-3 2s-3-1.5-3-3 1.5-3 3-3"/>',
+    scissors: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4L8.1 15.9M14.5 12.5L20 20M8.1 8.1L12 12"/>',
+    paw: '<circle cx="6" cy="11" r="1.8"/><circle cx="10.5" cy="7.5" r="1.8"/><circle cx="13.5" cy="7.5" r="1.8"/><circle cx="18" cy="11" r="1.8"/><path d="M8 16.5c0-2 1.8-3.5 4-3.5s4 1.5 4 3.5-1.8 3-4 3-4-1-4-3z"/>',
+    info: '<circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/>',
+    warning: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+    success: '<circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-5"/>',
+  };
+  function iconSvg(key) {
+    const body = ICONS[key] || '<circle cx="12" cy="12" r="3"/>';
+    return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + body + '</svg>';
+  }
+
+  function elFromHtml(html) {
+    const t = document.createElement('template');
+    t.innerHTML = html.trim();
+    return t.content.firstChild;
   }
 
   // ── Decision offer popup card ─────────────────────────────────────────────
@@ -435,4 +743,14 @@
   function fmtTime(date) {
     return date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
   }
+
+  // Hydrate structured-answer turns rendered server-side (chat history on page load):
+  // each carries its StructuredAnswer JSON in a data attribute; swap it for a live card.
+  document.querySelectorAll('.ai-content[data-structured]').forEach(function (host) {
+    try {
+      const ans = JSON.parse(host.getAttribute('data-structured'));
+      host.removeAttribute('data-structured');
+      host.replaceChildren(renderStructuredAnswer(ans));
+    } catch (e) { /* leave the fallback text in place */ }
+  });
 })();

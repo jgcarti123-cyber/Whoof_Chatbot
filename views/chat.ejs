@@ -144,7 +144,13 @@
             <% if (msg.escalated) { %>
               <div class="emergency-banner">⚠️ URGENT — See a vet or emergency clinic now</div>
             <% } %>
-            <div class="bubble markdown-content"><%= msg.answer_summary %></div>
+            <% if (msg.structured_answer) { %>
+              <div class="ai-content" data-structured="<%= JSON.stringify(msg.structured_answer) %>">
+                <div class="bubble markdown-content"><%= msg.answer_summary %></div>
+              </div>
+            <% } else { %>
+              <div class="bubble markdown-content"><%= msg.answer_summary %></div>
+            <% } %>
             <% if (msg.sources_cited && msg.sources_cited.length) { %>
               <details class="sources">
                 <summary>Sources (<%= msg.sources_cited.length %>)</summary>

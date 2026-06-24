@@ -4,7 +4,7 @@ const express = require('express');
 const requireAuth = require('../middleware/requireAuth');
 const { query } = require('../db');
 const { retrieveChunks, lookupBreed } = require('../lib/rag');
-const { buildSystemPrompt, generateAnswer, generateSessionTitle } = require('../lib/llm');
+const { buildSystemPrompt, generateAnswer, generateRoutedAnswer, generateSessionTitle } = require('../lib/llm');
 const { triageQuestion } = require('../lib/triage');
 const { getRollingSummary, rollUpInactiveChats } = require('../lib/memory');
 const {
@@ -15,6 +15,23 @@ const router = express.Router();
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isUuid = (v) => typeof v === 'string' && UUID_RE.test(v);
+
+// Leading slash-commands that force a response format, independent of the model's own
+// text-vs-structured choice. Case-insensitive; British/American spellings both accepted.
+// Add more here (e.g. '/plan', '/breakdown') without touching the answer flow.
+const FORMAT_COMMANDS = [
+  { aliases: ['visualise', 'visualize'], modality: 'structured' },
+];
+// Returns { modality, cleaned }: the forced modality (or null) and the message with the
+// command word stripped, so the stored/displayed question reads naturally.
+function parseFormatCommand(text) {
+  const m = (text || '').match(/^\/([a-z]+)\b[ \t]*/i);
+  if (m) {
+    const cmd = FORMAT_COMMANDS.find(c => c.aliases.includes(m[1].toLowerCase()));
+    if (cmd) return { modality: cmd.modality, cleaned: text.slice(m[0].length).trim() };
+  }
+  return { modality: null, cleaned: (text || '').trim() };
+}
 
 // Is the owner asking what was previously decided/agreed/discussed (recall), rather
 // than asking a fresh clinical question? Recall answers come from saved decisions and
@@ -40,13 +57,16 @@ const clearPending = (sessionId) => setPending(sessionId, null);
 
 // Persist one chat turn. Recall/confirmation/off-topic turns pass sources=[] and
 // confidence=null so they read as plain statements, not KB-grounded clinical claims.
-async function persistTurn({ petId, sessionId, message, answer, sources = [], confidence = null, escalated = false, escalationReason = null, symptomTags = [] }) {
+async function persistTurn({ petId, sessionId, message, answer, sources = [], confidence = null, escalated = false, escalationReason = null, symptomTags = [], structuredAnswer = null, responseModality = 'text', structuredTrigger = null }) {
   const r = await query(
     `INSERT INTO conversation_memory (
        pet_id, session_id, owner_question, answer_summary, sources_cited,
-       symptom_tags, confidence_level, escalated, escalation_reason
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, created_at`,
-    [petId, sessionId, message, answer, JSON.stringify(sources), symptomTags, confidence, escalated, escalationReason],
+       symptom_tags, confidence_level, escalated, escalation_reason,
+       structured_answer, response_modality, structured_trigger, structured_kind
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id, created_at`,
+    [petId, sessionId, message, answer, JSON.stringify(sources), symptomTags, confidence, escalated, escalationReason,
+     structuredAnswer ? JSON.stringify(structuredAnswer) : null, responseModality, structuredTrigger,
+     structuredAnswer ? (structuredAnswer.kind || null) : null],
   );
   await touchSession(sessionId);
   return r.rows[0];
@@ -172,7 +192,7 @@ router.get('/chat', requireAuth, async (req, res) => {
     if (activeSessionId) {
       const histResult = await query(
         `SELECT id, created_at, owner_question, answer_summary, sources_cited,
-                escalated, confidence_level
+                escalated, confidence_level, structured_answer
          FROM conversation_memory
          WHERE session_id = $1
          ORDER BY created_at ASC LIMIT 200`,
@@ -199,8 +219,17 @@ function enrichMessage(message, clarifications) {
 // POST /api/chat/message
 // Body: { message: string, clarifications?: [{ question, answer }] }
 router.post('/api/chat/message', requireAuth, async (req, res) => {
-  const message = (req.body.message || '').trim();
-  if (!message) return res.status(400).json({ error: 'Message is required.' });
+  const rawMessage = (req.body.message || '').trim();
+  if (!rawMessage) return res.status(400).json({ error: 'Message is required.' });
+
+  // Slash-command override (e.g. "/visualise <question>") forces a structured card.
+  // Strip the command so the stored/displayed question reads naturally; keep the raw
+  // text if nothing follows the command (so we never answer an empty message). The
+  // client also sends force_structured for the triage-clarification follow-up round.
+  const parsedCmd = parseFormatCommand(rawMessage);
+  const message = parsedCmd.cleaned || rawMessage;
+  const forceStructured = (req.body.force_structured === true)
+    || (parsedCmd.modality === 'structured' && parsedCmd.cleaned.length > 0);
 
   // Clarifying answers from a prior triage round (if the UI is on the 2nd submit)
   const clarifications = Array.isArray(req.body.clarifications)
@@ -355,10 +384,23 @@ router.post('/api/chat/message', requireAuth, async (req, res) => {
     });
 
     // Generate the answer and (for a brand-new chat) a summary title in parallel.
-    const [answer, sessionTitle] = await Promise.all([
-      generateAnswer(systemPrompt, message),
+    // The model decides text vs. structured — except emergencies, which stay plain text
+    // so the urgent banner + direct prose lead. `answer` is always the canonical text
+    // (a structured reply's fallbackText) so every downstream path works unchanged.
+    // Emergencies stay plain text (urgent banner + direct prose lead). Otherwise the
+    // model decides — unless a /visualise slash command forced the structured tool.
+    const [routed, sessionTitle] = await Promise.all([
+      escalated
+        ? generateAnswer(systemPrompt, message).then(text => ({ modality: 'text', text }))
+        : generateRoutedAnswer(systemPrompt, message, forceStructured ? { force: 'structured' } : {}),
       session.created ? applySessionTitle(sessionId, message) : Promise.resolve(null),
     ]);
+    const answer = routed.text;
+    const structuredAnswer = routed.structured || null;
+    const responseModality = routed.modality || 'text';
+    // How the structured path was chosen, for telemetry: a forced card is 'command',
+    // an unforced one is the model's own 'model' decision.
+    const structuredTrigger = structuredAnswer ? (forceStructured ? 'command' : 'model') : null;
 
     // Sources + confidence attach ONLY to KB-grounded clinical answers — never to a
     // recall ("what did we decide?") answer, and never when retrieval was too weak.
@@ -387,7 +429,9 @@ router.post('/api/chat/message', requireAuth, async (req, res) => {
     let finalAnswer = answer;
     let decisionOffer = false;
     let offerTitle = null, offerType = null, offerSummary = null;
-    if (!escalated && !recall && answer && (explicitSave || answer.length > 160)) {
+    // A structured reply owns its own actions (incl. save_decision), so skip the legacy
+    // pending-decision popup for those — it would double up the save UI.
+    if (!escalated && !recall && !structuredAnswer && answer && (explicitSave || answer.length > 160)) {
       const proposal = await detectDecision({ petName: pet.name, message, answer, recentHistory });
       if (proposal.decision_ready && proposal.offer_message) {
         await setPending(sessionId, {
@@ -412,15 +456,18 @@ router.post('/api/chat/message', requireAuth, async (req, res) => {
       petId: pet.id, sessionId, message, answer: finalAnswer,
       sources: sourcesCited, confidence: confidenceLevel,
       escalated, escalationReason, symptomTags,
+      structuredAnswer, responseModality, structuredTrigger,
     });
 
     res.json({
       answer: finalAnswer,
+      structured_answer: structuredAnswer || undefined,
+      response_modality: responseModality,
       sources: sourcesCited,
       escalated,
       escalation_reason: escalationReason,
       confidence_level: confidenceLevel,
-      used_fallback: usedFallback && !recall && !decisionOffer,
+      used_fallback: usedFallback && !recall && !decisionOffer && !structuredAnswer,
       decision_offer: decisionOffer,
       offer_title: offerTitle || undefined,
       offer_type: offerType || undefined,
@@ -497,6 +544,40 @@ router.post('/api/chat/session/:id/decision/confirm', requireAuth, async (req, r
     res.json({ ok: true, title: saved.title, answer: confirmMsg, created_at: mem.created_at, memory_id: mem.id });
   } catch (err) {
     console.error('Decision confirm error:', err);
+    res.status(500).json({ error: 'Could not save decision.' });
+  }
+});
+
+// POST /api/chat/session/:id/decision/save — save a decision from an explicit payload.
+// Used by the `save_decision` action button on a structured-answer card (which carries
+// its own { title, decision_type, summary }), separate from the legacy pending-offer flow.
+const DECISION_TYPES = ['diet_plan', 'allergy', 'diagnosis', 'treatment_routine', 'other'];
+router.post('/api/chat/session/:id/decision/save', requireAuth, async (req, res) => {
+  try {
+    if (!isUuid(req.params.id)) return res.status(400).json({ error: 'Invalid id.' });
+    const pet = await petForOwner(req.session.ownerId);
+    if (!pet) return res.status(400).json({ error: 'No pet profile found.' });
+    const session = await fetchSession(pet.id, req.params.id);
+    if (!session) return res.status(404).json({ error: 'Chat not found.' });
+
+    const petRow = await query('SELECT name FROM pet_profile WHERE id = $1', [pet.id]);
+    const petName = petRow.rows[0]?.name || 'your dog';
+
+    const title = (req.body.title || '').toString().trim().slice(0, 120);
+    if (!title) return res.status(400).json({ error: 'A title is required.' });
+    const decisionType = DECISION_TYPES.includes(req.body.decision_type) ? req.body.decision_type : 'other';
+    const summary = (req.body.summary || '').toString().trim().slice(0, 600);
+
+    const saved = await saveDecision(pet.id, {
+      decision_type: decisionType,
+      title,
+      content: summary ? { summary } : {},
+    });
+    const confirmMsg = `Done — I've saved **${saved.title}** to ${petName}'s record. I'll use it to keep future answers consistent.`;
+    const mem = await persistTurn({ petId: pet.id, sessionId: session.id, message: '[plan saved via card]', answer: confirmMsg });
+    res.json({ ok: true, title: saved.title, answer: confirmMsg, created_at: mem.created_at, memory_id: mem.id });
+  } catch (err) {
+    console.error('Decision save error:', err);
     res.status(500).json({ error: 'Could not save decision.' });
   }
 });
