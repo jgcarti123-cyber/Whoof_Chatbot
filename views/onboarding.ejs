@@ -28,14 +28,22 @@
   </header>
 
   <main class="form-container">
-    <div class="form-header">
-      <h2><span id="page-title"><%= pet?.name ? `${pet.name}'s Profile` : "Tell us about your dog" %></span></h2>
-      <p class="form-subtitle">
-        The vet AI uses this to personalise every answer to your dog's specific situation.
-        You can come back and update it any time.
-      </p>
+    <div class="form-header" style="display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
+      <div>
+        <h2><span id="page-title"><%= pet?.name ? `${pet.name}'s Profile` : "Tell us about your dog" %></span></h2>
+        <p class="form-subtitle">
+          The vet AI uses this to personalise every answer to your dog's specific situation.
+          You can come back and update it any time.
+        </p>
+      </div>
+      <button type="submit" form="profile-form" class="btn btn-primary" style="flex-shrink:0; margin-top:.25rem">
+        Save profile
+      </button>
     </div>
 
+    <% if (typeof saved !== 'undefined' && saved) { %>
+      <div class="alert alert-success">Profile saved — your name and dog's details are up to date.</div>
+    <% } %>
     <% if (error) { %>
       <div class="alert alert-error"><%= error %></div>
     <% } %>

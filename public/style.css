@@ -125,11 +125,12 @@ html.light .icon-moon { display: none; }
   width: 32px; height: 32px; padding: 0;
   display: flex; align-items: center; justify-content: center;
   border: 1.5px solid var(--border); border-radius: 8px;
-  background: transparent; color: var(--text-muted); cursor: pointer;
+  background: var(--surface-2); color: var(--text-muted); cursor: pointer;
   transition: background .15s, color .15s, border-color .15s;
   flex-shrink: 0;
 }
-.theme-toggle:hover { background: var(--surface-2); color: var(--text); }
+.theme-toggle:hover { background: var(--surface); color: var(--text); border-color: hsl(var(--c-fg) / .25); }
+html.light .theme-toggle { border-color: hsl(var(--c-fg) / .18); color: hsl(var(--c-fg) / .65); }
 
 /* ─── Cabinet Grotesk ────────────────────────────────────────────── */
 @font-face {
@@ -178,7 +179,8 @@ a:hover { text-decoration: underline; }
 
 /* ─── Alerts ───────────────────────────────────────────────────────── */
 .alert { padding: .8rem 1rem; border-radius: var(--radius); margin-bottom: 1rem; font-size: .9rem; }
-.alert-error { background: var(--danger-bg); border: 1px solid var(--danger-border); color: var(--danger); }
+.alert-error   { background: var(--danger-bg); border: 1px solid var(--danger-border); color: var(--danger); }
+.alert-success { background: hsl(var(--c-success) / .14); border: 1px solid hsl(var(--c-success) / .38); color: hsl(var(--c-success)); }
 
 /* ─── Form elements ────────────────────────────────────────────────── */
 .field { display: flex; flex-direction: column; gap: .3rem; }

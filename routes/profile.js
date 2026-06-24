@@ -16,10 +16,11 @@ router.get('/onboarding', requireAuth, async (req, res) => {
     ]);
     const breeds = breedsResult.rows; // [{breed_name, weight_range_kg}]
     const ownerName = ownerResult.rows[0]?.owner_name || '';
-    res.render('onboarding', { pet: petResult.rows[0] || null, breeds, ownerName, error: null });
+    const saved = req.query.saved === '1';
+    res.render('onboarding', { pet: petResult.rows[0] || null, breeds, ownerName, error: null, saved });
   } catch (err) {
     console.error('Onboarding GET error:', err);
-    res.render('onboarding', { pet: null, breeds: [], ownerName: '', error: 'Could not load profile.' });
+    res.render('onboarding', { pet: null, breeds: [], ownerName: '', error: 'Could not load profile.', saved: false });
   }
 });
 
@@ -35,6 +36,7 @@ router.post('/onboarding', requireAuth, async (req, res) => {
       breeds: [],
       ownerName: b.owner_name || '',
       error: "Please enter your dog's name.",
+      saved: false,
     });
   }
 
@@ -173,10 +175,10 @@ router.post('/onboarding', requireAuth, async (req, res) => {
       );
     }
 
-    res.redirect('/chat');
+    res.redirect('/onboarding?saved=1');
   } catch (err) {
     console.error('Profile save error:', err);
-    res.render('onboarding', { pet: b, breeds: [], ownerName: b.owner_name || '', error: 'Could not save profile. Please try again.' });
+    res.render('onboarding', { pet: b, breeds: [], ownerName: b.owner_name || '', error: 'Could not save profile. Please try again.', saved: false });
   }
 });
 
