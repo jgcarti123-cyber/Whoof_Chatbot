@@ -585,9 +585,12 @@ a:hover { text-decoration: underline; }
 /* App icon used as the brand mark everywhere. */
 .brand-mark {
   display: block; flex-shrink: 0; border-radius: 22%; object-fit: cover;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  box-shadow: 0 1px 3px rgba(0,0,0,.18);
+  /* The icon art is white-eyed and designed for a dark backdrop, so the chip
+     keeps its own near-black background in BOTH themes (like any app icon).
+     This stops the white eye from vanishing on a white container in light mode. */
+  background: #15171e;
+  border: 1px solid hsl(240 6% 26%);
+  box-shadow: 0 1px 3px rgba(0,0,0,.22);
 }
 .brand-mark-xs { width: 26px; height: 26px; }
 .brand-mark-sm { width: 34px; height: 34px; }
