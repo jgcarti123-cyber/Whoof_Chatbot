@@ -1,20 +1,145 @@
-/* ─── Design tokens ────────────────────────────────────────────────── */
+/* ─── Design tokens ──────────────────────────────────────────────────
+   shadcn-style theming. Raw HSL channels (--c-*) are the single source of
+   truth; they're wrapped with hsl() into the semantic names the rest of the
+   sheet already references (--bg, --primary, --border …). Dark is the default
+   (:root); a future light theme is a drop-in swap — override only the --c-*
+   channels under .light and every semantic token re-resolves automatically.
+   No component or rule hardcodes a brand hex; it all flows from here.
+   ──────────────────────────────────────────────────────────────────── */
 :root {
-  --primary:       #1B6B7D;
-  --primary-hover: #155969;
-  --primary-light: #E8F4F8;
-  --accent:        #2A9BBB;
-  --bg:            #F5F7F9;
-  --white:         #FFFFFF;
-  --text:          #1C2B33;
-  --text-muted:    #6B7E8A;
-  --border:        #D8E5EB;
-  --danger:        #C62828;
-  --danger-bg:     #FFEBEE;
-  --danger-border: #FFCDD2;
-  --success:       #2E7D32;
-  --radius:        10px;
-  --shadow:        0 2px 12px rgba(0,0,0,.08);
+  /* Raw channels: "H S% L%" (space-separated so hsl(var() / alpha) works) */
+  --c-bg:        240 6% 6%;     /* near-black canvas       */
+  --c-surface:   240 5% 11%;    /* cards, sidebar, bubbles */
+  --c-surface-2: 240 5% 15%;    /* inputs, hover surfaces  */
+  --c-border:    240 5% 22%;    /* subtle 1px lines        */
+  --c-fg:        0 0% 98%;      /* primary text            */
+  --c-muted:     240 5% 66%;    /* secondary text          */
+  --c-brand:     262 83% 58%;   /* violet  #7C3AED — signature */
+  --c-brand-2:   293 69% 49%;   /* magenta #C026D3 — signature */
+  --c-danger:    2 72% 62%;
+  --c-success:   142 45% 56%;
+  --c-warning:   38 92% 58%;
+
+  /* Semantic tokens (referenced everywhere else) */
+  --primary:       hsl(var(--c-brand));
+  --primary-hover: hsl(var(--c-brand) / .85);
+  --primary-light: hsl(var(--c-brand) / .15);   /* translucent tint for hover/active */
+  --accent:        hsl(var(--c-brand-2));
+  --bg:            hsl(var(--c-bg));
+  --surface:       hsl(var(--c-surface));
+  --surface-2:     hsl(var(--c-surface-2));
+  --white:         hsl(var(--c-surface));        /* "white" surfaces → dark surface */
+  --text:          hsl(var(--c-fg));
+  --text-muted:    hsl(var(--c-muted));
+  --border:        hsl(var(--c-border));
+  --danger:        hsl(var(--c-danger));
+  --danger-bg:     hsl(var(--c-danger) / .15);
+  --danger-border: hsl(var(--c-danger) / .42);
+  --success:       hsl(var(--c-success));
+
+  /* Signature gradient + glow — used rarely, so it pops */
+  --brand-gradient: linear-gradient(135deg, hsl(var(--c-brand)) 0%, hsl(var(--c-brand-2)) 100%);
+  --brand-glow:     0 0 32px hsl(var(--c-brand) / .45);
+  --brand-glow-sm:  0 0 14px hsl(var(--c-brand) / .40);
+  --focus-ring:     0 0 0 3px hsl(var(--c-brand) / .35);
+
+  /* Shape scale */
+  --radius:    12px;   /* buttons, inputs  — rounded-xl  */
+  --radius-lg: 16px;   /* panels, cards    — rounded-2xl */
+  --radius-sm: 8px;
+  --shadow:    0 10px 34px rgba(0,0,0,.40);
+}
+
+/* ─── Light theme ─────────────────────────────────────────────────── */
+html.light {
+  --c-bg:        240 17% 97%;   /* near-white, slight cool tint   */
+  --c-surface:   0 0% 100%;     /* pure white cards               */
+  --c-surface-2: 240 14% 94%;   /* input, hover surfaces          */
+  --c-border:    240 13% 88%;   /* subtle lines                   */
+  --c-fg:        222 32% 12%;   /* near-black text                */
+  --c-muted:     222 11% 48%;   /* secondary text                 */
+  --shadow:      0 2px 14px rgba(20,20,40,.09);
+  --brand-glow:    0 0 24px hsl(var(--c-brand) / .22);
+  --brand-glow-sm: 0 0 10px hsl(var(--c-brand) / .18);
+}
+
+/* ─── Auth page light overrides ───────────────────────────────────── */
+/* The left aside keeps its dark purple gradient — good contrast.     */
+/* Only the right form panel flips to white.                          */
+html.light .auth-split  { background: hsl(var(--c-bg)); color: hsl(var(--c-fg)); }
+html.light .auth-shell  { background: hsl(var(--c-bg)); }
+html.light .auth-main   { background: #fff; }
+
+html.light .auth-form-wrap h2 { color: hsl(var(--c-fg)); }
+html.light .auth-sub { color: hsl(var(--c-muted)); opacity: 1; }
+
+html.light .auth-split .field label  { color: hsl(var(--c-fg)); }
+html.light .auth-split .label-hint  { color: hsl(var(--c-muted)); opacity: 1; }
+html.light .auth-split .field input {
+  background: hsl(var(--c-surface-2));
+  border-color: hsl(var(--c-border));
+  color: hsl(var(--c-fg));
+  box-shadow: none;
+}
+html.light .auth-split .field input::placeholder  { color: hsl(var(--c-muted)); opacity: 1; }
+html.light .auth-split .field input:focus {
+  border-color: hsl(var(--c-brand) / .7);
+  box-shadow: var(--focus-ring);
+}
+html.light .auth-split .field input:-webkit-autofill,
+html.light .auth-split .field input:-webkit-autofill:focus {
+  -webkit-text-fill-color: hsl(var(--c-fg));
+  -webkit-box-shadow: 0 0 0 100px hsl(var(--c-surface-2)) inset;
+  caret-color: hsl(var(--c-fg));
+}
+html.light .auth-split .btn-primary {
+  background: hsl(var(--c-brand));
+  border-color: transparent;
+  color: #fff;
+  box-shadow: 0 4px 18px hsl(var(--c-brand) / .28);
+}
+html.light .auth-split .btn-primary:hover {
+  background: hsl(var(--c-brand) / .88);
+  border-color: transparent;
+  color: #fff;
+}
+html.light .auth-split .auth-help,
+html.light .auth-help  { color: hsl(var(--c-muted)); opacity: 1; }
+
+/* In light mode, show the brand gradient on the form side "Whoof" text */
+html.light .auth-form-wrap .brand-gradient-text {
+  background: var(--brand-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* ─── Theme toggle icon visibility ───────────────────────────────── */
+.icon-sun  { display: none; }
+.icon-moon { display: block; }
+html.light .icon-sun  { display: block; }
+html.light .icon-moon { display: none; }
+
+/* ─── Theme toggle button ─────────────────────────────────────────── */
+.theme-toggle {
+  width: 32px; height: 32px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  border: 1.5px solid var(--border); border-radius: 8px;
+  background: transparent; color: var(--text-muted); cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+  flex-shrink: 0;
+}
+.theme-toggle:hover { background: var(--surface-2); color: var(--text); }
+
+/* ─── Cabinet Grotesk ────────────────────────────────────────────── */
+@font-face {
+  font-family: 'CabinetGrotesk';
+  src: url('CabinetGrotesk_Complete/Fonts/WEB/fonts/CabinetGrotesk-Variable.woff2') format('woff2'),
+       url('CabinetGrotesk_Complete/Fonts/WEB/fonts/CabinetGrotesk-Variable.woff') format('woff'),
+       url('CabinetGrotesk_Complete/Fonts/WEB/fonts/CabinetGrotesk-Variable.ttf') format('truetype');
+  font-weight: 100 900;
+  font-display: swap;
+  font-style: normal;
 }
 
 /* ─── Reset / base ─────────────────────────────────────────────────── */
@@ -22,7 +147,7 @@
 
 html { font-size: 16px; }
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: 'CabinetGrotesk', ui-sans-serif, system-ui, -apple-system, sans-serif;
   background: var(--bg);
   color: var(--text);
   line-height: 1.6;
@@ -46,7 +171,7 @@ a:hover { text-decoration: underline; }
 .btn-primary  { background: var(--primary); color: #fff; border-color: var(--primary); }
 .btn-primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); color: #fff; text-decoration: none; }
 .btn-ghost    { background: transparent; color: var(--text-muted); border-color: var(--border); }
-.btn-ghost:hover { background: #eee; text-decoration: none; }
+.btn-ghost:hover { background: var(--surface-2); color: var(--text); text-decoration: none; }
 .btn-full     { width: 100%; justify-content: center; }
 .btn-sm       { padding: .35rem .75rem; font-size: .82rem; }
 .btn-lg       { padding: .75rem 1.6rem; font-size: 1rem; }
@@ -71,7 +196,15 @@ a:hover { text-decoration: underline; }
 .field input:focus, .field select:focus, .field textarea:focus {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(27,107,125,.12);
+  box-shadow: var(--focus-ring);
+}
+.field input::placeholder, .field textarea::placeholder { color: var(--text-muted); opacity: .8; }
+/* Keep autofilled fields on-theme (Chrome paints a light box by default). */
+.field input:-webkit-autofill,
+.field input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--text);
+  -webkit-box-shadow: 0 0 0 100px var(--surface-2) inset;
+  caret-color: var(--text);
 }
 .field textarea { resize: vertical; min-height: 80px; }
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: end; }
@@ -108,7 +241,7 @@ a:hover { text-decoration: underline; }
   max-width: 860px; margin: 0 auto; padding: .7rem 1.5rem;
   display: flex; align-items: center; justify-content: space-between;
 }
-.brand-small { font-weight: 700; font-size: 1rem; color: var(--primary); letter-spacing: -.01em; }
+.brand-small { display: inline-flex; align-items: center; gap: .45rem; font-weight: 700; font-size: 1rem; color: var(--primary); letter-spacing: -.01em; }
 
 /* ─── Onboarding / profile form ─────────────────────────────────────── */
 .form-page { }
@@ -208,11 +341,12 @@ a:hover { text-decoration: underline; }
 
 .ai-avatar {
   flex-shrink: 0; width: 36px; height: 36px;
-  background: var(--primary); color: #fff;
+  background: var(--brand-gradient); color: #fff;
   border-radius: 50%;
   font-size: .7rem; font-weight: 700; letter-spacing: -.03em;
   display: flex; align-items: center; justify-content: center;
   margin-top: .15rem;
+  box-shadow: var(--brand-glow-sm);
 }
 .bubble-wrap { display: flex; flex-direction: column; gap: .3rem; }
 .bubble {
@@ -247,9 +381,9 @@ a:hover { text-decoration: underline; }
 
 /* Confidence badge */
 .confidence { font-size: .72rem; font-weight: 600; padding: .1rem .4rem; border-radius: 4px; }
-.confidence-high   { background: #E8F5E9; color: #2E7D32; }
-.confidence-medium { background: #FFF8E1; color: #F57F17; }
-.confidence-low    { background: #FAFAFA; color: #757575; }
+.confidence-high   { background: hsl(var(--c-success) / .18); color: hsl(var(--c-success)); }
+.confidence-medium { background: hsl(var(--c-warning) / .18); color: hsl(var(--c-warning)); }
+.confidence-low    { background: hsl(var(--c-muted)   / .18); color: var(--text-muted); }
 
 /* General-guidance badge (answer not from a cited guideline) */
 .badge { font-size: .72rem; font-weight: 600; padding: .1rem .4rem; border-radius: 4px; }
@@ -313,44 +447,483 @@ a:hover { text-decoration: underline; }
 .markdown-content ul, .markdown-content ol { padding-left: 1.25rem; margin-bottom: .6rem; }
 .markdown-content li { margin-bottom: .2rem; }
 .markdown-content strong { font-weight: 600; }
-.markdown-content code { font-size: .87em; background: #f0f4f6; padding: .1em .35em; border-radius: 4px; }
+.markdown-content code { font-size: .87em; background: var(--surface-2); padding: .1em .35em; border-radius: 4px; }
 
-/* Input area */
+/* Input area — one cohesive rounded bar: sparkle · textarea · gradient send */
 .input-area {
   flex-shrink: 0;
   border-top: 1px solid var(--border);
-  background: var(--white);
-  padding: .9rem 1.5rem;
+  background: var(--bg);
+  padding: .9rem 1.5rem 1rem;
 }
-.input-wrap { display: flex; gap: .6rem; align-items: flex-end; }
+.input-wrap {
+  display: flex; gap: .5rem; align-items: flex-end;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: .4rem .4rem .4rem .85rem;
+  transition: border-color .15s, box-shadow .15s;
+}
+.input-wrap:focus-within {
+  border-color: hsl(var(--c-brand) / .7);
+  box-shadow: var(--focus-ring);
+}
+.input-spark {
+  flex-shrink: 0; display: flex; align-items: center;
+  color: hsl(var(--c-brand)); padding-bottom: .55rem;
+}
 #message-input {
-  flex: 1; border: 1.5px solid var(--border); border-radius: 10px;
-  padding: .65rem .9rem;
+  flex: 1; border: none; background: transparent; color: var(--text);
+  padding: .5rem 0;
   font-size: .95rem; font-family: inherit;
   resize: none; max-height: 160px; overflow-y: auto;
-  transition: border-color .15s, box-shadow .15s;
   line-height: 1.5;
 }
-#message-input:focus {
-  outline: none; border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(27,107,125,.12);
-}
+#message-input:focus { outline: none; box-shadow: none; }
+#message-input::placeholder { color: var(--text-muted); opacity: .85; }
 .send-btn {
-  flex-shrink: 0; width: 42px; height: 42px;
-  padding: 0; border-radius: 10px; justify-content: center;
+  flex-shrink: 0; width: 40px; height: 40px;
+  padding: 0; border: none; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--brand-gradient); color: #fff;
+  cursor: pointer; box-shadow: var(--brand-glow-sm);
+  transition: transform .12s, box-shadow .15s, opacity .15s;
 }
+.send-btn:hover { transform: translateY(-1px); box-shadow: var(--brand-glow); }
+.send-btn:active { transform: translateY(0); }
+.send-btn:disabled { opacity: .45; cursor: default; box-shadow: none; transform: none; }
 .input-disclaimer {
   font-size: .73rem; color: var(--text-muted);
-  margin-top: .45rem; text-align: center;
+  margin-top: .5rem; text-align: center;
+}
+
+/* ─── Decision offer popup card ──────────────────────────────────────── */
+.decision-offer-card {
+  margin-top: .85rem;
+  animation: doc-slide-in .2s ease;
+}
+@keyframes doc-slide-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.doc-card-inner {
+  border: 1.5px solid var(--primary);
+  border-radius: 10px;
+  padding: .9rem 1rem;
+  background: var(--primary-light, #f0faf8);
+  display: flex;
+  flex-direction: column;
+  gap: .55rem;
+}
+.doc-card-header {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+.doc-type-badge {
+  font-size: .68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  background: var(--primary);
+  color: #fff;
+  border-radius: 4px;
+  padding: .18em .55em;
+  flex-shrink: 0;
+}
+.doc-card-title {
+  font-size: .925rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.doc-card-summary {
+  font-size: .875rem;
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.5;
+}
+.doc-card-actions {
+  display: flex;
+  gap: .5rem;
+  flex-wrap: wrap;
+  margin-top: .15rem;
+}
+.doc-save-btn,
+.doc-dismiss-btn {
+  font-size: .85rem;
+  padding: .45rem .9rem;
+}
+.doc-card-success {
+  flex-direction: row;
+  align-items: center;
+  gap: .5rem;
+  color: var(--primary);
+  font-weight: 600;
+  font-size: .9rem;
+}
+.doc-success-icon {
+  font-size: 1rem;
+  font-weight: 800;
+}
+.doc-card-dismissed {
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity .26s ease, transform .26s ease;
+  pointer-events: none;
+}
+
+/* ─── Signature: gradient wordmark ───────────────────────────────────── */
+.brand-gradient-text {
+  background: var(--brand-gradient);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: transparent;
+}
+
+/* App icon used as the brand mark everywhere. */
+.brand-mark { display: block; flex-shrink: 0; border-radius: 22%; object-fit: cover; }
+.brand-mark-xs { width: 26px; height: 26px; }
+.brand-mark-sm { width: 34px; height: 34px; }
+.brand-mark-lg { width: 116px; height: 116px; box-shadow: 0 12px 34px rgba(0,0,0,.5); }
+
+/* ─── Signature: glossy gradient orb (hero + small marks) ─────────────── */
+.orb {
+  position: relative; width: 96px; height: 96px; border-radius: 50%;
+  flex-shrink: 0;
+  background:
+    radial-gradient(circle at 33% 28%, hsl(0 0% 100% / .92) 0%, hsl(0 0% 100% / 0) 24%),
+    radial-gradient(circle at 38% 34%, hsl(var(--c-brand-2)) 0%, hsl(var(--c-brand)) 56%, hsl(262 83% 38%) 100%);
+  box-shadow: var(--brand-glow), inset 0 -8px 20px hsl(262 83% 26% / .65);
+}
+/* Subtle paw motif so the orb still reads as a vet product, not a generic bot. */
+.orb::after {
+  content: ""; position: absolute; inset: 0;
+  background: center / 46% no-repeat
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23ffffff'%3E%3Cellipse cx='6' cy='11' rx='1.9' ry='2.5'/%3E%3Cellipse cx='9.7' cy='7.6' rx='1.9' ry='2.6'/%3E%3Cellipse cx='14.3' cy='7.6' rx='1.9' ry='2.6'/%3E%3Cellipse cx='18' cy='11' rx='1.9' ry='2.5'/%3E%3Cpath d='M12 11.5c2.8 0 4.8 2.1 4.8 4.4 0 1.9-1.7 2.9-3.3 2.4-.95-.3-2.05-.3-3 0-1.6.5-3.3-.5-3.3-2.4 0-2.3 2-4.4 4.8-4.4z'/%3E%3C/svg%3E");
+  opacity: .85;
+}
+.orb-lg { width: 112px; height: 112px; }
+.orb-sm { width: 30px; height: 30px; box-shadow: var(--brand-glow-sm); }
+.orb-sm::after { opacity: .9; }
+
+/* ─── Chat empty/hero state ───────────────────────────────────────────── */
+.empty-hero {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; gap: 1.05rem; padding: 1.5rem 1rem;
+}
+.empty-hero h2 {
+  font-size: clamp(1.5rem, 4vw, 2rem); font-weight: 700;
+  letter-spacing: -.025em; color: var(--text); margin-top: .3rem;
+}
+.empty-hero .hero-sub { color: var(--text-muted); font-size: .95rem; max-width: 32rem; }
+
+.quick-pills { display: flex; flex-wrap: wrap; gap: .55rem; justify-content: center; margin-top: .2rem; }
+.quick-pill {
+  display: inline-flex; align-items: center; gap: .45rem;
+  padding: .5rem .95rem; border-radius: 999px;
+  background: var(--surface); border: 1px solid var(--border);
+  color: var(--text); font: inherit; font-size: .85rem; cursor: pointer;
+  transition: border-color .15s, background .15s, transform .1s;
+}
+.quick-pill:hover { border-color: hsl(var(--c-brand) / .6); background: var(--surface-2); }
+.quick-pill:active { transform: translateY(1px); }
+.quick-pill svg { color: hsl(var(--c-brand)); flex-shrink: 0; }
+
+.feature-cards {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: .75rem;
+  width: 100%; max-width: 42rem; margin-top: 1rem;
+}
+.feature-card {
+  text-align: left; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 1rem;
+  display: flex; flex-direction: column; gap: .35rem;
+  transition: border-color .15s, transform .12s, box-shadow .15s;
+}
+.feature-card:hover {
+  border-color: hsl(var(--c-brand) / .55);
+  transform: translateY(-2px); box-shadow: var(--shadow);
+}
+.feature-card-icon {
+  width: 34px; height: 34px; border-radius: 9px; margin-bottom: .25rem;
+  display: flex; align-items: center; justify-content: center;
+  background: hsl(var(--c-brand) / .16); color: hsl(var(--c-brand));
+}
+.feature-card-tag {
+  font-size: .67rem; text-transform: uppercase; letter-spacing: .05em;
+  font-weight: 700; color: hsl(var(--c-brand));
+}
+.feature-card-title { font-weight: 600; font-size: .92rem; color: var(--text); }
+.feature-card-desc { font-size: .82rem; color: var(--text-muted); line-height: 1.45; }
+
+/* ─── Auth: split-screen login card ─────────────────────────────────── */
+.auth-split {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: #030304;
+  color: #fff;
+  font-family: 'CabinetGrotesk', ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+.auth-shell {
+  width: 100%;
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 1.15fr .85fr;
+  padding: 0;
+  background: #030304;
+  border: 0;
+  box-shadow: none;
+}
+.auth-aside {
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #08080B;
+}
+.auth-aside::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.16) 0%, rgba(255,255,255,0) 28%),
+    radial-gradient(80% 58% at 42% 12%, rgba(230,190,255,.86) 0%, rgba(173,70,255,.72) 24%, rgba(121,29,219,.44) 44%, transparent 72%),
+    linear-gradient(180deg, rgba(92,31,188,.3) 0%, rgba(0,0,0,.9) 77%, #020203 100%);
+  filter: saturate(1.18);
+}
+.auth-aside::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(92% 28% at 48% 6%, rgba(255,255,255,.56) 0%, rgba(255,255,255,0) 62%),
+    linear-gradient(90deg, rgba(0,0,0,.82) 0%, transparent 18%, transparent 82%, rgba(0,0,0,.82) 100%),
+    linear-gradient(180deg, rgba(0,0,0,.08) 0%, rgba(0,0,0,.86) 100%);
+  pointer-events: none;
+}
+.auth-aside-glow { display: none; }
+.auth-aside-content {
+  position: relative;
+  z-index: 1;
+  width: min(520px, calc(100% - 7rem));
+  padding: clamp(2rem, 5vw, 5rem) 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1.05rem;
+  text-align: left;
+}
+.auth-brand {
+  display: flex;
+  align-items: center;
+  gap: .7rem;
+  font-weight: 650;
+  font-size: 1rem;
+  margin-bottom: .65rem;
+  color: #fff;
+}
+.auth-aside .auth-brand {
+  padding: .45rem .65rem .45rem .5rem;
+  border: 1px solid hsl(0 0% 100% / .1);
+  border-radius: 999px;
+  background: hsl(0 0% 100% / .08);
+  box-shadow: inset 0 1px 0 hsl(0 0% 100% / .08);
+  backdrop-filter: blur(14px);
+}
+.auth-split .brand-gradient-text {
+  background: none;
+  -webkit-background-clip: initial;
+  background-clip: initial;
+  -webkit-text-fill-color: #fff;
+  color: #fff;
+}
+.auth-aside h1 {
+  max-width: 14ch;
+  font-size: clamp(1.85rem, 3vw, 2.9rem);
+  line-height: 1.08;
+  font-weight: 780;
+  letter-spacing: -.01em;
+  color: #fff;
+  text-wrap: balance;
+}
+.auth-aside p {
+  color: #fff;
+  max-width: 28rem;
+  font-size: clamp(.82rem, 1vw, .95rem);
+  line-height: 1.6;
+  font-weight: 420;
+  opacity: .78;
+}
+.stepper {
+  width: min(390px, 100%);
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: .55rem;
+  margin-top: 1.35rem;
+}
+.step {
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  gap: .8rem;
+  padding: .7rem .9rem;
+  border-radius: 9px;
+  border: 1px solid hsl(0 0% 100% / .1);
+  background: hsl(0 0% 100% / .085);
+  color: #fff;
+  text-align: left;
+  backdrop-filter: blur(16px);
+  box-shadow: inset 0 1px 0 hsl(0 0% 100% / .04);
+}
+.step-num {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: .76rem;
+  font-weight: 700;
+  color: #fff;
+  border: 1px solid hsl(0 0% 100% / .18);
+  background: hsl(0 0% 100% / .12);
+}
+.step-title { font-weight: 620; font-size: .88rem; color: #fff; }
+.step-desc { font-size: .76rem; font-weight: 420; color: #fff; opacity: .62; }
+.step.active {
+  background: hsl(var(--c-brand) / .62);
+  color: #fff;
+  border-color: hsl(0 0% 100% / .36);
+  box-shadow: 0 14px 32px hsl(var(--c-brand) / .18);
+}
+.step.active .step-num {
+  background: hsl(0 0% 100% / .16);
+  color: #fff;
+  border-color: hsl(0 0% 100% / .3);
+}
+.step.active .step-title { color: #fff; }
+.step.active .step-desc { color: #fff; opacity: .76; }
+.auth-main {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(2rem, 5vw, 4.8rem);
+  background: #030304;
+  min-height: 100vh;
+}
+.auth-form-wrap {
+  width: 100%;
+  max-width: 350px;
+  color: #fff;
+}
+.auth-form-wrap .auth-brand { display: none; }
+.auth-form-wrap h2 {
+  font-size: 1.35rem;
+  line-height: 1.18;
+  font-weight: 740;
+  letter-spacing: -.01em;
+  color: #fff;
+  text-align: center;
+}
+.auth-sub {
+  color: #fff;
+  font-size: .8rem;
+  line-height: 1.5;
+  margin: .45rem 0 1.5rem;
+  text-align: center;
+  opacity: .72;
+}
+.auth-split .auth-form { gap: .95rem; }
+.auth-split .field { gap: .42rem; }
+.auth-split .field label,
+.auth-split .label-hint,
+.auth-split .auth-help {
+  color: #fff;
+}
+.auth-split .label-hint { opacity: .62; }
+.auth-split .field input {
+  min-height: 48px;
+  border: 1px solid hsl(0 0% 100% / .08);
+  border-radius: 8px;
+  background: hsl(0 0% 100% / .09);
+  color: #fff;
+  box-shadow: inset 0 1px 0 hsl(0 0% 100% / .03);
+}
+.auth-split .field input:focus {
+  border-color: hsl(0 0% 100% / .5);
+  box-shadow: 0 0 0 3px hsl(0 0% 100% / .12);
+}
+.auth-split .field input::placeholder { color: #fff; opacity: .45; }
+.auth-split .field input:-webkit-autofill,
+.auth-split .field input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #fff;
+  -webkit-box-shadow: 0 0 0 100px #1A1A1D inset;
+  caret-color: #fff;
+}
+.auth-split .btn-primary {
+  min-height: 50px;
+  margin-top: .45rem;
+  border: 1px solid hsl(0 0% 100% / .18);
+  border-radius: 8px;
+  background: hsl(0 0% 100% / .16);
+  color: #fff;
+  font-weight: 750;
+  box-shadow: 0 14px 34px rgba(124,58,237,.18);
+}
+.auth-split .btn-primary:hover {
+  background: hsl(0 0% 100% / .22);
+  border-color: hsl(0 0% 100% / .36);
+  color: #fff;
+  text-decoration: none;
+}
+.auth-split .alert-error {
+  background: hsl(var(--c-danger) / .18);
+  border-color: hsl(var(--c-danger) / .42);
+  color: #fff;
+}
+.auth-help {
+  text-align: center;
+  font-size: .82rem;
+  margin-top: 1.25rem;
+  opacity: .68;
 }
 
 /* ─── Responsive ─────────────────────────────────────────────────────── */
+@media (max-width: 860px) {
+  /* Auth: collapse to a single form column; show the brand inline instead. */
+  .auth-split { align-items: stretch; padding: 0; }
+  .auth-shell {
+    min-height: 100vh;
+    grid-template-columns: 1fr;
+    padding: 0;
+    border: 0;
+  }
+  .auth-aside { display: none; }
+  .auth-main { min-height: 100vh; }
+  .auth-form-wrap .auth-brand {
+    display: flex; justify-content: center; font-size: 1.3rem; margin-bottom: 1.25rem;
+  }
+}
+
+@media (max-width: 720px) {
+  .feature-cards { grid-template-columns: 1fr; max-width: 26rem; }
+}
+
 @media (max-width: 640px) {
   .field-row { grid-template-columns: 1fr; }
   .message { max-width: 92%; }
   .form-container { padding: 1rem 1rem 3rem; }
   .chat-header-inner { padding: .6rem 1rem; }
   .messages-area { padding: 1rem; }
+  .auth-main { padding: 1.75rem 1.25rem; }
   /* On phones, drop the sidebar to a slim top strip with just the New chat action. */
   .chat-shell { flex-direction: column; }
   .chat-sidebar {

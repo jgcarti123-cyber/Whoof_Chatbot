@@ -9,15 +9,17 @@ const router = express.Router();
 // GET /onboarding — show form, pre-fill if profile already exists
 router.get('/onboarding', requireAuth, async (req, res) => {
   try {
-    const [petResult, breedsResult] = await Promise.all([
+    const [petResult, breedsResult, ownerResult] = await Promise.all([
       query('SELECT * FROM pet_profile WHERE owner_id = $1 LIMIT 1', [req.session.ownerId]),
       query('SELECT breed_name, weight_range_kg FROM breed_reference ORDER BY breed_name'),
+      query('SELECT owner_name FROM owners WHERE id = $1', [req.session.ownerId]),
     ]);
     const breeds = breedsResult.rows; // [{breed_name, weight_range_kg}]
-    res.render('onboarding', { pet: petResult.rows[0] || null, breeds, error: null });
+    const ownerName = ownerResult.rows[0]?.owner_name || '';
+    res.render('onboarding', { pet: petResult.rows[0] || null, breeds, ownerName, error: null });
   } catch (err) {
     console.error('Onboarding GET error:', err);
-    res.render('onboarding', { pet: null, breeds: [], error: 'Could not load profile.' });
+    res.render('onboarding', { pet: null, breeds: [], ownerName: '', error: 'Could not load profile.' });
   }
 });
 
@@ -26,9 +28,12 @@ router.post('/onboarding', requireAuth, async (req, res) => {
   const b = req.body;
 
   const name = b.name?.trim();
+  const ownerName = b.owner_name?.trim() || null;
   if (!name) {
     return res.render('onboarding', {
       pet: b,
+      breeds: [],
+      ownerName: b.owner_name || '',
       error: "Please enter your dog's name.",
     });
   }
@@ -96,6 +101,10 @@ router.post('/onboarding', requireAuth, async (req, res) => {
   };
 
   try {
+    // The owner's own name lives on owners; save it alongside the pet upsert so
+    // it's mapped to this dog (one human → one account → one dog).
+    await query('UPDATE owners SET owner_name = $1 WHERE id = $2', [ownerName, req.session.ownerId]);
+
     const existing = await query(
       'SELECT id FROM pet_profile WHERE owner_id = $1 LIMIT 1',
       [req.session.ownerId],
@@ -167,7 +176,7 @@ router.post('/onboarding', requireAuth, async (req, res) => {
     res.redirect('/chat');
   } catch (err) {
     console.error('Profile save error:', err);
-    res.render('onboarding', { pet: b, error: 'Could not save profile. Please try again.' });
+    res.render('onboarding', { pet: b, breeds: [], ownerName: b.owner_name || '', error: 'Could not save profile. Please try again.' });
   }
 });
 

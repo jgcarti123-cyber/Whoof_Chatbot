@@ -1,0 +1,10 @@
+{
+  "name": "Whoof — Vet AI",
+  "short_name": "Whoof",
+  "icons": [
+    { "src": "/whoof-icon.png", "sizes": "1024x1024", "type": "image/png", "purpose": "any" }
+  ],
+  "theme_color": "#1A1A1A",
+  "background_color": "#1A1A1A",
+  "display": "standalone"
+}

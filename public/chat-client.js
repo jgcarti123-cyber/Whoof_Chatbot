@@ -8,6 +8,7 @@
   // The chat this page is writing to. Empty until the first message of a brand-new
   // chat is sent, at which point the server returns the new id and we adopt it.
   let sessionId = window.__SESSION_ID__ || null;
+  const petName = window.__PET_NAME__ || 'your dog';
 
   // Auto-grow textarea
   input.addEventListener('input', function () {
@@ -57,11 +58,25 @@
     });
   }
 
+  // Quick-action pills + feature cards in the empty/hero state: drop their
+  // starter prompt into the input and send it like any other message.
+  messagesArea.addEventListener('click', function (e) {
+    const trigger = e.target.closest('[data-prompt]');
+    if (!trigger) return;
+    const text = trigger.getAttribute('data-prompt');
+    if (!text) return;
+    input.value = text;
+    sendFromInput();
+  });
+
   function sendFromInput() {
     const text = input.value.trim();
     if (!text) return;
     input.value = '';
     input.style.height = 'auto';
+    // First message of a brand-new chat clears the hero so messages take over.
+    const hero = messagesArea.querySelector('.empty-hero');
+    if (hero) hero.remove();
     appendUserMessage(text);
     postMessage(text, []);
   }
@@ -279,6 +294,80 @@
     bubbleEl.innerHTML = marked.parse(data.answer || '');
 
     messagesArea.appendChild(el);
+
+    // Decision offer popup card — shown instead of inline "just say yes" text.
+    if (data.decision_offer && data.offer_title) {
+      const card = buildDecisionCard(data.offer_title, data.offer_type, data.offer_summary);
+      el.querySelector('.bubble-wrap').appendChild(card);
+    }
+  }
+
+  // ── Decision offer popup card ─────────────────────────────────────────────
+  const TYPE_LABELS = {
+    diet_plan: 'Diet Plan',
+    allergy: 'Allergy',
+    diagnosis: 'Diagnosis',
+    treatment_routine: 'Routine',
+    other: 'Plan',
+  };
+
+  function buildDecisionCard(title, type, summary) {
+    const typeLabel = TYPE_LABELS[type] || 'Plan';
+    const card = document.createElement('div');
+    card.className = 'decision-offer-card';
+    card.innerHTML =
+      '<div class="doc-card-inner">' +
+        '<div class="doc-card-header">' +
+          '<span class="doc-type-badge">' + escHtml(typeLabel) + '</span>' +
+          '<span class="doc-card-title">' + escHtml(title) + '</span>' +
+        '</div>' +
+        (summary ? '<p class="doc-card-summary">' + escHtml(summary) + '</p>' : '') +
+        '<div class="doc-card-actions">' +
+          '<button type="button" class="btn btn-primary doc-save-btn">Save to ' + escHtml(petName) + '’s record</button>' +
+          '<button type="button" class="btn btn-ghost doc-dismiss-btn">Not now</button>' +
+        '</div>' +
+      '</div>';
+
+    const saveBtn = card.querySelector('.doc-save-btn');
+    const dismissBtn = card.querySelector('.doc-dismiss-btn');
+
+    saveBtn.addEventListener('click', function () {
+      saveBtn.disabled = true;
+      dismissBtn.disabled = true;
+      saveBtn.textContent = 'Saving…';
+      fetch('/api/chat/session/' + sessionId + '/decision/confirm', { method: 'POST' })
+        .then(function (r) { return r.json(); })
+        .then(function (result) {
+          if (result.ok) {
+            card.innerHTML =
+              '<div class="doc-card-inner doc-card-success">' +
+                '<span class="doc-success-icon">&#10003;</span>' +
+                ' Saved to ' + escHtml(petName) + '’s record' +
+              '</div>';
+            if (result.answer) {
+              appendAIMessage({ answer: result.answer, sources: [], escalated: false, created_at: result.created_at });
+              scrollToBottom();
+            }
+          } else {
+            saveBtn.textContent = 'Save to ' + escHtml(petName) + '’s record';
+            saveBtn.disabled = false;
+            dismissBtn.disabled = false;
+          }
+        })
+        .catch(function () {
+          saveBtn.textContent = 'Save to ' + escHtml(petName) + '’s record';
+          saveBtn.disabled = false;
+          dismissBtn.disabled = false;
+        });
+    });
+
+    dismissBtn.addEventListener('click', function () {
+      card.classList.add('doc-card-dismissed');
+      fetch('/api/chat/session/' + sessionId + '/decision/dismiss', { method: 'POST' }).catch(function () {});
+      setTimeout(function () { card.remove(); }, 280);
+    });
+
+    return card;
   }
 
   function appendErrorMessage(msg) {

@@ -3,41 +3,88 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Whoof — Vet AI Test</title>
+  <title>Whoof — Vet AI</title>
+  <link rel="icon" type="image/png" sizes="1024x1024" href="/whoof-icon.png">
+  <link rel="apple-touch-icon" href="/whoof-icon.png">
+  <link rel="manifest" href="/site.webmanifest">
+  <meta name="theme-color" content="#1A1A1A">
   <link rel="stylesheet" href="/style.css">
+  <script>(function(){var t=localStorage.getItem('whoof-theme')||(window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');if(t==='light')document.documentElement.classList.add('light');})();</script>
 </head>
-<body class="auth-page">
-  <div class="auth-card">
-    <div class="brand">
-      <span class="brand-icon">🐾</span>
-      <h1>Whoof</h1>
-      <p class="brand-tagline">Vet AI — Early Access Test</p>
-    </div>
+<body class="auth-split">
 
-    <% if (error) { %>
-      <div class="alert alert-error"><%= error %></div>
-    <% } %>
-
-    <form method="POST" action="/login" class="auth-form">
-      <div class="field">
-        <label for="email">Your email</label>
-        <input type="email" id="email" name="email" required
-               placeholder="you@example.com" autocomplete="email">
+  <div class="auth-shell">
+    <aside class="auth-aside">
+      <div class="auth-aside-glow"></div>
+      <div class="auth-aside-content">
+        <div class="auth-brand">
+          <img class="brand-mark brand-mark-sm" src="/whoof-icon.png" alt="">
+          <span class="brand-gradient-text">Whoof</span>
+        </div>
+        <h1>Vet care that remembers your dog.</h1>
+        <p>Log in to continue with answers shaped around your dog's profile, history, diet, and routine care.</p>
+        <ol class="stepper">
+          <li class="step active">
+            <span class="step-num">1</span>
+            <div>
+              <div class="step-title">Log in with your access code</div>
+              <div class="step-desc">Sent to you by the Whoof team</div>
+            </div>
+          </li>
+          <li class="step">
+            <span class="step-num">2</span>
+            <div>
+              <div class="step-title">Set up your dog's profile</div>
+              <div class="step-desc">Breed, age, diet and history</div>
+            </div>
+          </li>
+          <li class="step">
+            <span class="step-num">3</span>
+            <div>
+              <div class="step-title">Start asking Whoof AI</div>
+              <div class="step-desc">Symptoms, diet, vaccinations and more</div>
+            </div>
+          </li>
+        </ol>
       </div>
-      <div class="field">
-        <label for="access_code">Access code
-          <span class="label-hint">sent to you by the Whoof team</span>
-        </label>
-        <input type="text" id="access_code" name="access_code" required
-               placeholder="e.g. K8M2XP" autocomplete="off"
-               style="letter-spacing: 0.15em; text-transform: uppercase;">
-      </div>
-      <button type="submit" class="btn btn-primary btn-full">Log in</button>
-    </form>
+    </aside>
 
-    <p class="auth-help">
-      Don't have a code? Contact John to be added as a tester.
-    </p>
+    <main class="auth-main">
+      <div class="auth-form-wrap">
+        <div class="auth-brand">
+          <img class="brand-mark brand-mark-sm" src="/whoof-icon.png" alt="">
+          <span class="brand-gradient-text">Whoof</span>
+        </div>
+        <h2>Log in to Whoof</h2>
+        <p class="auth-sub">Enter the email and access code from your invite.</p>
+
+        <% if (error) { %>
+          <div class="alert alert-error"><%= error %></div>
+        <% } %>
+
+        <form method="POST" action="/login" class="auth-form">
+          <div class="field">
+            <label for="email">Your email</label>
+            <input type="email" id="email" name="email" required
+                   placeholder="you@example.com" autocomplete="email">
+          </div>
+          <div class="field">
+            <label for="access_code">Access code
+              <span class="label-hint">sent to you by the Whoof team</span>
+            </label>
+            <input type="text" id="access_code" name="access_code" required
+                   placeholder="e.g. K8M2XP" autocomplete="off"
+                   style="letter-spacing: 0.15em; text-transform: uppercase;">
+          </div>
+          <button type="submit" class="btn btn-primary btn-full btn-lg">Log in</button>
+        </form>
+
+        <p class="auth-help">
+          Don't have a code? Contact John to be added as a tester.
+        </p>
+      </div>
+    </main>
   </div>
+
 </body>
 </html>

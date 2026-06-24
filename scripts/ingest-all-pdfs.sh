@@ -34,6 +34,7 @@ title_for() {
     "J of Small Animal Practice - 2022 - Monteiro - 2022 WSAVA guidelines for the recognition  assessment and treatment of pain.pdf") echo "WSAVA Pain Management Guidelines (2022)" ;;
     "Veterinary Internal Medicine - 2010 -  - Endoscopic  Biopsy  and Histopathologic Guidelines for the Evaluation of.pdf") echo "Endoscopic Biopsy & Histopathologic GI Guidelines (2010)" ;;
     "WSAVA-Vaccination-guidelines-2024.pdf")  echo "WSAVA Vaccination Guidelines (2024)" ;;
+    "SKDixitArticle.pdf")                     echo "Dixit et al. — Emesis Induction in Dogs (2022)" ;;
     *) echo "" ;;
   esac
 }

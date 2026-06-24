@@ -4,7 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title><%= pet.name %> — Whoof Vet AI</title>
+  <link rel="icon" type="image/png" sizes="1024x1024" href="/whoof-icon.png">
+  <link rel="apple-touch-icon" href="/whoof-icon.png">
+  <link rel="manifest" href="/site.webmanifest">
+  <meta name="theme-color" content="#1A1A1A">
   <link rel="stylesheet" href="/style.css">
+  <script>(function(){var t=localStorage.getItem('whoof-theme')||(window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');if(t==='light')document.documentElement.classList.add('light');})();</script>
   <!-- marked.js for rendering markdown in AI responses -->
   <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
 </head>
@@ -13,10 +18,18 @@
   <header class="chat-header">
     <div class="chat-header-inner">
       <div class="chat-header-left">
-        <span class="brand-small">🐾 Whoof</span>
-        <span class="chat-pet-name">Asking about <strong><%= pet.name %></strong></span>
+        <span class="brand-small"><img class="brand-mark brand-mark-xs" src="/whoof-icon.png" alt=""> <span class="brand-gradient-text">Whoof</span></span>
+        <span class="chat-pet-name">Asking about <strong><%= pet.name %></strong><% if (typeof ownerName !== 'undefined' && ownerName) { %> · <%= ownerName %>'s dog<% } %></span>
       </div>
       <div class="chat-header-right">
+        <button id="theme-toggle" class="theme-toggle" title="Toggle light / dark" aria-label="Toggle theme">
+          <span class="icon-moon" aria-hidden="true">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          </span>
+          <span class="icon-sun" aria-hidden="true">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+          </span>
+        </button>
         <a href="/onboarding" class="btn btn-ghost btn-sm">Edit profile</a>
         <form method="POST" action="/logout" style="margin:0">
           <button type="submit" class="btn btn-ghost btn-sm">Log out</button>
@@ -57,6 +70,51 @@
 
     <div class="chat-layout">
     <div class="messages-area" id="messages-area">
+
+      <% if (!history.length) { %>
+      <!-- Empty / hero state: gradient orb, headline, quick actions -->
+      <div class="empty-hero">
+        <img class="brand-mark brand-mark-lg" src="/whoof-icon.png" alt="Whoof">
+        <h2>How can I help with <%= pet.name %> today?</h2>
+        <p class="hero-sub">Ask me about <%= pet.name %>'s symptoms, diet, or vaccinations — anything at all. I already know the profile.</p>
+
+        <div class="quick-pills">
+          <button type="button" class="quick-pill" data-prompt="<%= pet.name %> has seemed a bit off today — can you help me check some symptoms?">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+            Symptom check
+          </button>
+          <button type="button" class="quick-pill" data-prompt="What's a good daily diet and feeding routine for <%= pet.name %>?">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11h16a8 8 0 0 1-8 8 8 8 0 0 1-8-8z"></path><path d="M12 4v3"></path></svg>
+            Diet advice
+          </button>
+          <button type="button" class="quick-pill" data-prompt="Is <%= pet.name %> due for any vaccinations or preventive care?">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+            Vaccinations
+          </button>
+        </div>
+
+        <div class="feature-cards">
+          <button type="button" class="feature-card" data-prompt="I'd like to check some symptoms <%= pet.name %> is showing.">
+            <span class="feature-card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg></span>
+            <span class="feature-card-tag">Health</span>
+            <span class="feature-card-title">Symptom checker</span>
+            <span class="feature-card-desc">Describe what's off and I'll help you triage it.</span>
+          </button>
+          <button type="button" class="feature-card" data-prompt="Can you review <%= pet.name %>'s diet and feeding routine?">
+            <span class="feature-card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11h16a8 8 0 0 1-8 8 8 8 0 0 1-8-8z"></path><path d="M12 4v3"></path></svg></span>
+            <span class="feature-card-tag">Nutrition</span>
+            <span class="feature-card-title">Diet &amp; feeding</span>
+            <span class="feature-card-desc">Portion sizes, treats, and food questions.</span>
+          </button>
+          <button type="button" class="feature-card" data-prompt="What preventive care or vaccinations should I plan for <%= pet.name %>?">
+            <span class="feature-card-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg></span>
+            <span class="feature-card-tag">Prevention</span>
+            <span class="feature-card-title">Vaccines &amp; care</span>
+            <span class="feature-card-desc">Schedules, boosters, and routine care.</span>
+          </button>
+        </div>
+      </div>
+      <% } else { %>
 
       <!-- System welcome message -->
       <div class="message ai-message">
@@ -105,18 +163,24 @@
           </div>
         </div>
       <% }) %>
+      <% } %>
 
     </div><!-- /messages-area -->
 
     <div class="input-area">
       <div class="input-wrap">
+        <span class="input-spark" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3l1.7 4.8L18.5 9.5l-4.8 1.7L12 16l-1.7-4.8L5.5 9.5l4.8-1.7z"></path>
+          </svg>
+        </span>
         <textarea
           id="message-input"
           placeholder="Ask Whoof AI about <%= pet.name %>…"
           rows="1"
           autofocus
         ></textarea>
-        <button id="send-btn" class="btn btn-primary send-btn" aria-label="Send">
+        <button id="send-btn" class="send-btn" aria-label="Send">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <line x1="22" y1="2" x2="11" y2="13"></line>
             <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
@@ -131,10 +195,16 @@
   </div><!-- /chat-shell -->
 
   <script>
-    // Active chat id for the client (empty string = a fresh, not-yet-saved chat).
     window.__SESSION_ID__ = '<%= activeSessionId || "" %>';
+    window.__PET_NAME__ = '<%- pet.name.replace(/\\/g, "\\\\").replace(/'/g, "\\'") %>';
   </script>
   <script src="/chat-client.js"></script>
+  <script>
+    document.getElementById('theme-toggle').addEventListener('click', function () {
+      var light = document.documentElement.classList.toggle('light');
+      localStorage.setItem('whoof-theme', light ? 'light' : 'dark');
+    });
+  </script>
   <script>
     // Render existing history messages as markdown
     document.querySelectorAll('.markdown-content').forEach(el => {

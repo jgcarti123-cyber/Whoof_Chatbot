@@ -139,12 +139,15 @@ function extractSymptomTags(text) {
 router.get('/chat', requireAuth, async (req, res) => {
   try {
     const petResult = await query(
-      'SELECT * FROM pet_profile WHERE owner_id = $1 LIMIT 1',
+      `SELECT p.*, o.owner_name FROM pet_profile p
+       JOIN owners o ON o.id = p.owner_id
+       WHERE p.owner_id = $1 LIMIT 1`,
       [req.session.ownerId],
     );
     if (!petResult.rows.length) return res.redirect('/onboarding');
 
     const pet = petResult.rows[0];
+    const ownerName = pet.owner_name || '';
 
     // All chats for the sidebar: pinned first, then most recently used.
     const sessionsRes = await query(
@@ -178,7 +181,7 @@ router.get('/chat', requireAuth, async (req, res) => {
       history = histResult.rows;
     }
 
-    res.render('chat', { pet, history, sessions, activeSessionId });
+    res.render('chat', { pet, history, sessions, activeSessionId, ownerName });
   } catch (err) {
     console.error('Chat GET error:', err);
     res.status(500).send('Error loading chat.');
@@ -208,7 +211,9 @@ router.post('/api/chat/message', requireAuth, async (req, res) => {
 
   try {
     const petResult = await query(
-      'SELECT * FROM pet_profile WHERE owner_id = $1 LIMIT 1',
+      `SELECT p.*, o.owner_name FROM pet_profile p
+       JOIN owners o ON o.id = p.owner_id
+       WHERE p.owner_id = $1 LIMIT 1`,
       [req.session.ownerId],
     );
     if (!petResult.rows.length) {
@@ -346,7 +351,7 @@ router.post('/api/chat/message', requireAuth, async (req, res) => {
     }
 
     const systemPrompt = buildSystemPrompt(pet, chunks, recentHistory, breedInfo, {
-      clarifications, decisions, rollingSummary,
+      clarifications, decisions, rollingSummary, ownerName: pet.owner_name || '',
     });
 
     // Generate the answer and (for a brand-new chat) a summary title in parallel.
@@ -381,6 +386,7 @@ router.post('/api/chat/message', requireAuth, async (req, res) => {
     const explicitSave = /\b(lock (this|that|it) in|lock it in|save (this|that|it)( as)?|make (this|that|it) (his|her|the) official|set (this|that) as|official (plan|diet|routine)|update (his|her|the) (plan|diet|routine))\b/i.test(message);
     let finalAnswer = answer;
     let decisionOffer = false;
+    let offerTitle = null, offerType = null, offerSummary = null;
     if (!escalated && !recall && answer && (explicitSave || answer.length > 160)) {
       const proposal = await detectDecision({ petName: pet.name, message, answer, recentHistory });
       if (proposal.decision_ready && proposal.offer_message) {
@@ -389,8 +395,11 @@ router.post('/api/chat/message', requireAuth, async (req, res) => {
           title: proposal.title,
           content: proposal.content,
         });
-        finalAnswer = `${answer}\n\n${proposal.offer_message}`;
+        // Keep the answer clean — the offer is shown as a popup card in the UI.
         decisionOffer = true;
+        offerTitle = proposal.title;
+        offerType = proposal.decision_type;
+        offerSummary = proposal.content?.summary || '';
         // An offer turn is about a decision, not a guideline claim — drop the
         // sources/confidence UI so it reads as a plain acknowledgement.
         sourcesCited = [];
@@ -413,6 +422,9 @@ router.post('/api/chat/message', requireAuth, async (req, res) => {
       confidence_level: confidenceLevel,
       used_fallback: usedFallback && !recall && !decisionOffer,
       decision_offer: decisionOffer,
+      offer_title: offerTitle || undefined,
+      offer_type: offerType || undefined,
+      offer_summary: offerSummary || undefined,
       rewritten_query: rewrittenQuery !== enriched ? rewrittenQuery : undefined,
       session_id: sessionId,
       session_title: sessionTitle || undefined,
@@ -463,6 +475,43 @@ router.delete('/api/chat/session/:id', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('Delete session error:', err);
     res.status(500).json({ error: 'Could not delete chat.' });
+  }
+});
+
+// POST /api/chat/session/:id/decision/confirm — save the pending offer without typing "yes"
+router.post('/api/chat/session/:id/decision/confirm', requireAuth, async (req, res) => {
+  try {
+    if (!isUuid(req.params.id)) return res.status(400).json({ error: 'Invalid id.' });
+    const pet = await petForOwner(req.session.ownerId);
+    if (!pet) return res.status(400).json({ error: 'No pet profile found.' });
+    const petRow = await query('SELECT name FROM pet_profile WHERE id = $1', [pet.id]);
+    const petName = petRow.rows[0]?.name || 'your dog';
+    const session = await fetchSession(pet.id, req.params.id);
+    if (!session || !session.pending_decision) {
+      return res.status(404).json({ error: 'No pending offer for this chat.' });
+    }
+    const saved = await saveDecision(pet.id, session.pending_decision);
+    await clearPending(session.id);
+    const confirmMsg = `Done — I've saved **${saved.title}** to ${petName}'s record. I'll use it to keep future answers consistent.`;
+    const mem = await persistTurn({ petId: pet.id, sessionId: session.id, message: '[decision confirmed via popup]', answer: confirmMsg });
+    res.json({ ok: true, title: saved.title, answer: confirmMsg, created_at: mem.created_at, memory_id: mem.id });
+  } catch (err) {
+    console.error('Decision confirm error:', err);
+    res.status(500).json({ error: 'Could not save decision.' });
+  }
+});
+
+// POST /api/chat/session/:id/decision/dismiss — dismiss the pending offer without typing "no"
+router.post('/api/chat/session/:id/decision/dismiss', requireAuth, async (req, res) => {
+  try {
+    if (!isUuid(req.params.id)) return res.status(400).json({ error: 'Invalid id.' });
+    const pet = await petForOwner(req.session.ownerId);
+    if (!pet) return res.status(400).json({ error: 'No pet profile found.' });
+    await clearPending(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Decision dismiss error:', err);
+    res.status(500).json({ error: 'Could not dismiss offer.' });
   }
 });
 
