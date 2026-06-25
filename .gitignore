@@ -12,3 +12,5 @@ kb-source/*.pdf
 
 # Local PDF hash tracker (contains absolute machine paths, not portable)
 scripts/.pdf-hashes.json
+ingest-log.txt
+*.log

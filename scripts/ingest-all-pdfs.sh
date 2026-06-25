@@ -17,7 +17,7 @@
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
-EXTRA_ARGS=("$@")
+EXTRA_ARGS=("${@:-}")
 
 # Clean citation titles for files whose auto-derived title is poor.
 # Anything not listed here uses the parser's derived title.
@@ -35,6 +35,7 @@ title_for() {
     "Veterinary Internal Medicine - 2010 -  - Endoscopic  Biopsy  and Histopathologic Guidelines for the Evaluation of.pdf") echo "Endoscopic Biopsy & Histopathologic GI Guidelines (2010)" ;;
     "WSAVA-Vaccination-guidelines-2024.pdf")  echo "WSAVA Vaccination Guidelines (2024)" ;;
     "SKDixitArticle.pdf")                     echo "Dixit et al. — Emesis Induction in Dogs (2022)" ;;
+    "alex-et-al-2025-gwas-for-behavioral-traits-in-golden-retrievers-identifies-genes-implicated-in-human-temperament-mental.pdf") echo "Alex et al. — GWAS for Behavioral Traits in Golden Retrievers (2025)" ;;
     *) echo "" ;;
   esac
 }
@@ -52,9 +53,9 @@ for pdf in kb-source/*.pdf; do
   echo "########################################################################"
 
   if [ -n "$title" ]; then
-    node scripts/ingest-kb-pdf.js "$pdf" --title "$title" "${EXTRA_ARGS[@]}"
+    node scripts/ingest-kb-pdf.js "$pdf" --title "$title" "${EXTRA_ARGS[@]:-}"
   else
-    node scripts/ingest-kb-pdf.js "$pdf" "${EXTRA_ARGS[@]}"
+    node scripts/ingest-kb-pdf.js "$pdf" "${EXTRA_ARGS[@]:-}"
   fi
 
   if [ $? -eq 0 ]; then ok=$((ok+1)); else failed=$((failed+1)); fi
