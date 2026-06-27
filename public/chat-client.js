@@ -149,8 +149,7 @@
   function sendFromInput() {
     const raw = input.value.trim();
     if (!raw) return;
-    // A "/visualise <question>" command forces a structured card; strip the command
-    // so the bubble shows just the question.
+    // A "/visualise <question>" command forces a structured card.
     const cmd = parseFormatCommand(raw);
     // Bare "/visualise" with no request after it: don't send an empty command to the
     // model — hold the text in the box and nudge for detail instead.
@@ -159,12 +158,13 @@
     input.style.height = 'auto';
     hideSlashHint();
     const forceStructured = cmd.modality === 'structured' && cmd.cleaned.length > 0;
-    const text = forceStructured ? cmd.cleaned : raw;
     // First message of a brand-new chat clears the hero so messages take over.
     const hero = messagesArea.querySelector('.empty-hero');
     if (hero) hero.remove();
-    appendUserMessage(text);
-    postMessage(text, [], { forceStructured });
+    // Keep the full "/visualise …" text visible in the chat so the owner can see the
+    // command was applied; the server strips it before the model sees the question.
+    appendUserMessage(raw);
+    postMessage(raw, [], { forceStructured });
   }
 
   // Core request. `clarifications` is [] on a first ask, or the owner's triage
@@ -399,6 +399,12 @@
     if (data.decision_offer && data.offer_title) {
       const card = buildDecisionCard(data.offer_title, data.offer_type, data.offer_summary);
       el.querySelector('.bubble-wrap').appendChild(card);
+    }
+
+    // Rating widget — only on persisted turns. A needs_clarification round isn't saved
+    // to conversation_memory, so it carries no memory_id and gets no widget.
+    if (data.memory_id) {
+      el.querySelector('.bubble-wrap').appendChild(buildFeedbackWidget(data.memory_id, null));
     }
   }
 
@@ -653,7 +659,7 @@
                 ' Saved to ' + escHtml(petName) + '’s record' +
               '</div>';
             if (result.answer) {
-              appendAIMessage({ answer: result.answer, sources: [], escalated: false, created_at: result.created_at });
+              appendAIMessage({ answer: result.answer, sources: [], escalated: false, created_at: result.created_at, memory_id: result.memory_id });
               scrollToBottom();
             }
           } else {
@@ -676,6 +682,149 @@
     });
 
     return card;
+  }
+
+  // ── Per-answer feedback widget (tester ratings) ───────────────────────────
+  // A lightweight rating log for manual review. Collapsed = a 1–10 scale; tapping a
+  // number fires an optimistic upsert immediately (useful even if they stop there),
+  // then expands in place for optional tags + a comment. Matches the decision-card /
+  // action-row pattern of attaching under the AI bubble. Fire-and-forget — never blocks.
+  const FEEDBACK_TAGS = [
+    { key: 'exactly_right',         label: 'Exactly right' },
+    { key: 'wrong_info',            label: 'Wrong info' },
+    { key: 'missed_pet_context',    label: 'Missed pet context' },
+    { key: 'misunderstood_question', label: 'Misunderstood me' },
+    { key: 'too_long',              label: 'Too long' },
+    { key: 'too_vague',             label: 'Too vague' },
+    { key: 'tone_off',              label: 'Tone off' },
+  ];
+
+  function buildFeedbackWidget(memoryId, existing) {
+    const state = {
+      rating: existing && existing.rating ? Number(existing.rating) : null,
+      tags: existing && Array.isArray(existing.tags) ? existing.tags.slice() : [],
+      comment: (existing && existing.comment) || '',
+      open: false,
+      done: !!(existing && existing.rating),
+    };
+
+    const widget = document.createElement('div');
+    widget.className = 'feedback-widget';
+
+    // Optimistic, fire-and-forget. A failure here must never disrupt the chat.
+    function persist() {
+      fetch('/api/chat/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          memory_id: memoryId,
+          rating: state.rating,
+          tags: state.tags,
+          comment: state.comment ? state.comment : undefined,
+        }),
+      }).catch(function () {});
+    }
+
+    function scaleHtml() {
+      let btns = '';
+      for (let n = 1; n <= 10; n++) {
+        btns += '<button type="button" class="fb-score' + (state.rating === n ? ' selected' : '') +
+          '" data-score="' + n + '" aria-label="Rate ' + n + ' out of 10">' + n + '</button>';
+      }
+      return '<div class="fb-scale-row">' +
+        '<span class="fb-scale-label">Rate this answer</span>' +
+        '<div class="fb-scale">' + btns + '</div>' +
+      '</div>';
+    }
+
+    function detailHtml() {
+      const chips = FEEDBACK_TAGS.map(function (t) {
+        return '<button type="button" class="fb-tag' + (state.tags.indexOf(t.key) !== -1 ? ' selected' : '') +
+          '" data-tag="' + t.key + '">' + escHtml(t.label) + '</button>';
+      }).join('');
+      return '<div class="fb-detail">' +
+        '<div class="fb-tags">' + chips + '</div>' +
+        '<textarea class="fb-comment" rows="2" placeholder="Add a note (optional) — what was off, or what worked?"></textarea>' +
+        '<div class="fb-detail-actions">' +
+          '<button type="button" class="btn btn-primary btn-sm fb-submit">Send feedback</button>' +
+          '<span class="fb-saved-hint">Rating saved ✓ — add detail if you like</span>' +
+        '</div>' +
+      '</div>';
+    }
+
+    function doneHtml() {
+      return '<div class="fb-done">' +
+        '<span class="fb-check">&#10003;</span> Thanks — got it.' +
+        '<button type="button" class="fb-edit">Edit</button>' +
+      '</div>';
+    }
+
+    function render() {
+      let html = scaleHtml();
+      if (state.open) html += detailHtml();
+      else if (state.done) html += doneHtml();
+      widget.innerHTML = html;
+
+      // Re-set the comment value after innerHTML rebuild (preserves in-progress text).
+      const ta = widget.querySelector('.fb-comment');
+      if (ta) ta.value = state.comment;
+      wire();
+    }
+
+    function wire() {
+      Array.prototype.forEach.call(widget.querySelectorAll('.fb-score'), function (b) {
+        b.addEventListener('click', function () {
+          state.rating = Number(b.getAttribute('data-score'));
+          state.open = true;        // expand for optional detail
+          state.done = false;
+          persist();                // log the rating immediately (optimistic)
+          render();
+        });
+      });
+      Array.prototype.forEach.call(widget.querySelectorAll('.fb-tag'), function (b) {
+        b.addEventListener('click', function () {
+          const key = b.getAttribute('data-tag');
+          const i = state.tags.indexOf(key);
+          if (i === -1) state.tags.push(key); else state.tags.splice(i, 1);
+          b.classList.toggle('selected');
+        });
+      });
+      const ta = widget.querySelector('.fb-comment');
+      if (ta) ta.addEventListener('input', function () { state.comment = ta.value; });
+      const submit = widget.querySelector('.fb-submit');
+      if (submit) submit.addEventListener('click', function () {
+        state.open = false;
+        state.done = true;
+        persist();                  // upsert with tags + comment
+        render();
+      });
+      const edit = widget.querySelector('.fb-edit');
+      if (edit) edit.addEventListener('click', function () {
+        state.open = true;
+        state.done = false;
+        render();
+      });
+    }
+
+    render();
+    return widget;
+  }
+
+  // Attach the rating widget to every server-rendered AI turn that has a persisted id
+  // (hydrating any prior rating the tester already left, so it survives reloads).
+  function initHistoryFeedback() {
+    Array.prototype.forEach.call(
+      document.querySelectorAll('.ai-message[data-memory-id]'),
+      function (el) {
+        const id = el.getAttribute('data-memory-id');
+        const wrap = el.querySelector('.bubble-wrap');
+        if (!id || !wrap || wrap.querySelector('.feedback-widget')) return;
+        let existing = null;
+        const raw = el.getAttribute('data-feedback');
+        if (raw) { try { existing = JSON.parse(raw); } catch (e) { /* ignore */ } }
+        wrap.appendChild(buildFeedbackWidget(id, existing));
+      },
+    );
   }
 
   function appendErrorMessage(msg) {
@@ -753,4 +902,7 @@
       host.replaceChildren(renderStructuredAnswer(ans));
     } catch (e) { /* leave the fallback text in place */ }
   });
+
+  // Attach rating widgets to the server-rendered history turns on page load.
+  initHistoryFeedback();
 })();

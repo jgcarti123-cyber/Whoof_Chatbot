@@ -191,11 +191,13 @@ router.get('/chat', requireAuth, async (req, res) => {
     let history = [];
     if (activeSessionId) {
       const histResult = await query(
-        `SELECT id, created_at, owner_question, answer_summary, sources_cited,
-                escalated, confidence_level, structured_answer
-         FROM conversation_memory
-         WHERE session_id = $1
-         ORDER BY created_at ASC LIMIT 200`,
+        `SELECT cm.id, cm.created_at, cm.owner_question, cm.answer_summary, cm.sources_cited,
+                cm.escalated, cm.confidence_level, cm.structured_answer,
+                rf.rating AS fb_rating, rf.tags AS fb_tags, rf.comment AS fb_comment
+         FROM conversation_memory cm
+         LEFT JOIN response_feedback rf ON rf.memory_id = cm.id
+         WHERE cm.session_id = $1
+         ORDER BY cm.created_at ASC LIMIT 200`,
         [activeSessionId],
       );
       history = histResult.rows;
@@ -384,23 +386,21 @@ router.post('/api/chat/message', requireAuth, async (req, res) => {
     });
 
     // Generate the answer and (for a brand-new chat) a summary title in parallel.
-    // The model decides text vs. structured — except emergencies, which stay plain text
-    // so the urgent banner + direct prose lead. `answer` is always the canonical text
-    // (a structured reply's fallbackText) so every downstream path works unchanged.
-    // Emergencies stay plain text (urgent banner + direct prose lead). Otherwise the
-    // model decides — unless a /visualise slash command forced the structured tool.
+    // Cards are OPT-IN: only an explicit /visualise slash command (forceStructured)
+    // produces a structured card. Every other message — and every emergency — is plain
+    // text. `answer` is always the canonical text (a structured reply's fallbackText)
+    // so every downstream path works unchanged.
     const [routed, sessionTitle] = await Promise.all([
-      escalated
-        ? generateAnswer(systemPrompt, message).then(text => ({ modality: 'text', text }))
-        : generateRoutedAnswer(systemPrompt, message, forceStructured ? { force: 'structured' } : {}),
+      forceStructured && !escalated
+        ? generateRoutedAnswer(systemPrompt, message, { force: 'structured' })
+        : generateAnswer(systemPrompt, message).then(text => ({ modality: 'text', text })),
       session.created ? applySessionTitle(sessionId, message) : Promise.resolve(null),
     ]);
     const answer = routed.text;
     const structuredAnswer = routed.structured || null;
     const responseModality = routed.modality || 'text';
-    // How the structured path was chosen, for telemetry: a forced card is 'command',
-    // an unforced one is the model's own 'model' decision.
-    const structuredTrigger = structuredAnswer ? (forceStructured ? 'command' : 'model') : null;
+    // A structured card now only ever comes from the /visualise command.
+    const structuredTrigger = structuredAnswer ? 'command' : null;
 
     // Sources + confidence attach ONLY to KB-grounded clinical answers — never to a
     // recall ("what did we decide?") answer, and never when retrieval was too weak.
@@ -453,7 +453,9 @@ router.post('/api/chat/message', requireAuth, async (req, res) => {
 
     const symptomTags = extractSymptomTags(enriched);
     const mem = await persistTurn({
-      petId: pet.id, sessionId, message, answer: finalAnswer,
+      // Store the raw text (incl. any "/visualise" prefix) so the chat shows the
+      // command on reload; the model/retrieval already used the stripped `message`.
+      petId: pet.id, sessionId, message: rawMessage, answer: finalAnswer,
       sources: sourcesCited, confidence: confidenceLevel,
       escalated, escalationReason, symptomTags,
       structuredAnswer, responseModality, structuredTrigger,
@@ -579,6 +581,70 @@ router.post('/api/chat/session/:id/decision/save', requireAuth, async (req, res)
   } catch (err) {
     console.error('Decision save error:', err);
     res.status(500).json({ error: 'Could not save decision.' });
+  }
+});
+
+// ── Response feedback (tester ratings) ─────────────────────────────────────
+// A lightweight feedback LOG for manual review — NOT a training pipeline. One
+// upsertable row per turn. Lives here alongside the other session-scoped owner actions
+// (pin/delete/decision) so it shares requireAuth, the owner→pet scoping, and isUuid,
+// rather than duplicating all of that in a one-route file. Purely additive: this never
+// touches the chat/triage/RAG flow, and a failure here can't block a conversation.
+const FEEDBACK_TAGS = [
+  'wrong_info', 'missed_pet_context', 'too_long', 'too_vague',
+  'misunderstood_question', 'tone_off', 'exactly_right',
+];
+
+// POST /api/chat/feedback  Body: { memory_id, rating, tags?, comment? }
+router.post('/api/chat/feedback', requireAuth, async (req, res) => {
+  try {
+    const memoryId = req.body.memory_id;
+    if (!isUuid(memoryId)) return res.status(400).json({ error: 'Invalid memory_id.' });
+
+    // rating must be an integer 1–10 — reject anything else.
+    const rating = Number(req.body.rating);
+    if (!Number.isInteger(rating) || rating < 1 || rating > 10) {
+      return res.status(400).json({ error: 'rating must be an integer from 1 to 10.' });
+    }
+
+    // tags: keep only known values; silently drop unknown ones (don't fail the request
+    // over one bad tag), and de-dupe. Never trust whatever the client sent.
+    const tags = Array.isArray(req.body.tags)
+      ? Array.from(new Set(req.body.tags.filter(t => FEEDBACK_TAGS.includes(t))))
+      : [];
+
+    // comment: optional free text, capped.
+    const comment = req.body.comment != null
+      ? (String(req.body.comment).trim().slice(0, 2000) || null)
+      : null;
+
+    // Ownership gate: the turn must belong to THIS owner's pet. This both authorizes the
+    // write and is the source of owner_id we store — one tester can never rate, or even
+    // probe the existence of, another tester's turn (missing vs. not-yours look identical).
+    const owned = await query(
+      `SELECT cm.id
+         FROM conversation_memory cm
+         JOIN pet_profile p ON p.id = cm.pet_id
+        WHERE cm.id = $1 AND p.owner_id = $2
+        LIMIT 1`,
+      [memoryId, req.session.ownerId],
+    );
+    if (!owned.rows.length) return res.status(404).json({ error: 'Turn not found.' });
+
+    const upsert = await query(
+      `INSERT INTO response_feedback (memory_id, owner_id, rating, tags, comment)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (memory_id) DO UPDATE
+         SET rating  = EXCLUDED.rating,
+             tags    = EXCLUDED.tags,
+             comment = EXCLUDED.comment
+       RETURNING memory_id, rating, tags, comment, created_at, updated_at`,
+      [memoryId, req.session.ownerId, rating, tags, comment],
+    );
+    res.json({ ok: true, feedback: upsert.rows[0] });
+  } catch (err) {
+    console.error('Feedback submit error:', err);
+    res.status(500).json({ error: 'Could not save feedback.' });
   }
 });
 

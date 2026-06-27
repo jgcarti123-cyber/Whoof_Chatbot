@@ -39,6 +39,7 @@ app.use(session({
 app.use('/', require('./routes/auth'));
 app.use('/', require('./routes/profile'));
 app.use('/', require('./routes/chat'));
+app.use('/', require('./routes/admin'));
 
 // Root: redirect based on whether the owner has a pet profile yet
 app.get('/', requireAuth, async (req, res) => {

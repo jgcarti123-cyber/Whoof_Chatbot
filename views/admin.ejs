@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Whoof Admin</title>
+  <link rel="icon" type="image/png" href="/whoof-icon.png">
+  <link rel="stylesheet" href="/style.css">
+  <script>(function(){var t=localStorage.getItem('whoof-theme')||(window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');if(t==='light')document.documentElement.classList.add('light');})();</script>
+  <style>
+    .adm-shell { max-width: 860px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+    .adm-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2rem; flex-wrap: wrap; gap: .75rem; }
+    .adm-brand  { display: flex; align-items: center; gap: .55rem; font-weight: 700; font-size: 1rem; }
+    .adm-actions { display: flex; align-items: center; gap: .65rem; }
+
+    .tester-tabs { display: flex; gap: .4rem; margin-bottom: 1.75rem; flex-wrap: wrap; }
+    .tester-tab {
+      padding: .38rem .85rem; border-radius: 999px; font-size: .82rem; font-weight: 600;
+      border: 1.5px solid var(--border); background: var(--surface); color: var(--text-muted);
+      text-decoration: none; transition: all .14s;
+    }
+    .tester-tab:hover { color: var(--text); border-color: hsl(var(--c-brand)/.4); }
+    .tester-tab.active { background: var(--primary-light); border-color: hsl(var(--c-brand)/.55); color: var(--primary); }
+
+    .stats { display: flex; gap: .75rem; margin-bottom: 1.75rem; flex-wrap: wrap; }
+    .stat-pill {
+      padding: .45rem 1rem; border-radius: 999px; font-size: .82rem; font-weight: 600;
+      background: var(--surface); border: 1px solid var(--border); color: var(--text-muted);
+    }
+    .stat-pill span { color: var(--text); margin-right: .3rem; }
+
+    .empty { padding: 3rem 1rem; text-align: center; color: var(--text-muted); font-size: .9rem; }
+
+    .turn-list { display: flex; flex-direction: column; gap: .65rem; }
+    .turn-card {
+      border: 1px solid var(--border); border-radius: var(--radius);
+      background: var(--surface); overflow: hidden;
+    }
+    .turn-head {
+      display: flex; align-items: center; gap: .75rem; padding: .75rem 1rem;
+      cursor: pointer; user-select: none;
+    }
+    .turn-head:hover { background: var(--surface-2); }
+    .rating-badge {
+      flex-shrink: 0; width: 28px; height: 28px; border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: .78rem; font-weight: 800;
+    }
+    .rating-none { background: var(--surface-2); color: var(--text-muted); }
+    .rating-low  { background: hsl(var(--c-danger)/.18); color: hsl(var(--c-danger)); }
+    .rating-mid  { background: hsl(var(--c-warning)/.18); color: hsl(var(--c-warning)); }
+    .rating-high { background: hsl(var(--c-success)/.18); color: hsl(var(--c-success)); }
+
+    .turn-q {
+      flex: 1; font-size: .875rem; color: var(--text); white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis;
+    }
+    .turn-meta { font-size: .75rem; color: var(--text-muted); flex-shrink: 0; }
+    .turn-chevron { flex-shrink: 0; color: var(--text-muted); transition: transform .18s; }
+    .turn-card.open .turn-chevron { transform: rotate(180deg); }
+
+    .turn-body { display: none; padding: 0 1rem 1rem; border-top: 1px solid var(--border); }
+    .turn-card.open .turn-body { display: block; }
+
+    .turn-section-label {
+      font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+      color: var(--text-muted); margin: .9rem 0 .35rem;
+    }
+    .turn-text {
+      font-size: .86rem; color: var(--text); line-height: 1.6;
+      white-space: pre-wrap; word-break: break-word;
+    }
+    .tag-row { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .4rem; }
+    .tag-chip {
+      font-size: .73rem; font-weight: 500; padding: .2rem .55rem;
+      border-radius: 999px; border: 1px solid var(--border);
+      background: var(--surface-2); color: var(--text-muted);
+    }
+    .urg-badge {
+      font-size: .7rem; font-weight: 700; padding: .15rem .5rem; border-radius: 4px;
+      background: hsl(var(--c-danger)/.15); color: hsl(var(--c-danger));
+      border: 1px solid hsl(var(--c-danger)/.3); margin-left: auto; flex-shrink: 0;
+    }
+  </style>
+</head>
+<body style="background:var(--bg);color:var(--text);min-height:100vh">
+
+  <div class="adm-shell">
+
+    <div class="adm-header">
+      <div class="adm-brand">
+        <img src="/whoof-icon.png" style="width:28px;height:28px;border-radius:22%">
+        Whoof Admin
+      </div>
+      <div class="adm-actions">
+        <form method="POST" action="/admin/logout" style="margin:0">
+          <button type="submit" class="btn btn-ghost btn-sm">Sign out</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Tester switcher -->
+    <div class="tester-tabs">
+      <% testers.forEach(function(t) { %>
+        <a href="/admin?tester=<%= encodeURIComponent(t) %>"
+           class="tester-tab <%= t === selected ? 'active' : '' %>">
+          <%= t %>
+        </a>
+      <% }) %>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats">
+      <div class="stat-pill"><span><%= turns.length %></span>turns</div>
+      <% if (rated > 0) { %>
+        <div class="stat-pill"><span><%= avgRating %> / 10</span>avg rating</div>
+        <div class="stat-pill"><span><%= lowCount %></span>low (≤4)</div>
+      <% } else { %>
+        <div class="stat-pill">no ratings yet</div>
+      <% } %>
+    </div>
+
+    <!-- Turns -->
+    <% if (!turns.length) { %>
+      <div class="empty"><%= selected %> hasn't started a conversation yet.</div>
+    <% } else { %>
+      <div class="turn-list">
+        <% turns.forEach(function(t, i) {
+          var ratingClass = !t.rating ? 'rating-none'
+            : t.rating <= 4 ? 'rating-low'
+            : t.rating <= 7 ? 'rating-mid'
+            : 'rating-high';
+          var ratingLabel = t.rating ? t.rating : '—';
+          var date = new Date(t.created_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+        %>
+          <div class="turn-card" id="card-<%= i %>">
+            <div class="turn-head" onclick="toggle(<%= i %>)">
+              <div class="rating-badge <%= ratingClass %>"><%= ratingLabel %></div>
+              <div class="turn-q"><%= t.owner_question %></div>
+              <% if (t.escalated) { %><span class="urg-badge">URGENT</span><% } %>
+              <div class="turn-meta"><%= date %></div>
+              <svg class="turn-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+            <div class="turn-body">
+              <div class="turn-section-label">Question</div>
+              <div class="turn-text"><%= t.owner_question %></div>
+
+              <div class="turn-section-label">Answer</div>
+              <div class="turn-text"><%= t.answer_summary %></div>
+
+              <% if (t.rating) { %>
+                <div class="turn-section-label">Feedback</div>
+                <div class="turn-text">Rating: <strong><%= t.rating %>/10</strong>
+                  <% if (t.fb_comment) { %> — <%= t.fb_comment %><% } %>
+                </div>
+                <% if (t.tags && t.tags.length) { %>
+                  <div class="tag-row">
+                    <% t.tags.forEach(function(tag) { %>
+                      <span class="tag-chip"><%= tag.replace(/_/g,' ') %></span>
+                    <% }) %>
+                  </div>
+                <% } %>
+              <% } %>
+            </div>
+          </div>
+        <% }) %>
+      </div>
+    <% } %>
+
+  </div>
+
+  <script>
+    function toggle(i) {
+      document.getElementById('card-' + i).classList.toggle('open');
+    }
+  </script>
+</body>
+</html>

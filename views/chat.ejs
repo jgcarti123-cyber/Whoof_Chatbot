@@ -138,7 +138,7 @@
           </div>
         </div>
 
-        <div class="message ai-message <%= msg.escalated ? 'emergency' : '' %>">
+        <div class="message ai-message <%= msg.escalated ? 'emergency' : '' %>" data-memory-id="<%= msg.id %>"<% if (msg.fb_rating) { %> data-feedback="<%= JSON.stringify({ rating: msg.fb_rating, tags: msg.fb_tags || [], comment: msg.fb_comment || '' }) %>"<% } %>>
           <div class="ai-avatar">W</div>
           <div class="bubble-wrap">
             <% if (msg.escalated) { %>

@@ -213,6 +213,27 @@ a:hover { text-decoration: underline; }
 .field-narrow { flex: 0 1 auto; }
 .field-row-checks { align-items: center; gap: 1.5rem; margin-top: .25rem; }
 .label-hint { font-size: .78rem; font-weight: 400; color: var(--text-muted); margin-left: .25rem; }
+.remember-row {
+  display: flex; align-items: center; gap: .5rem;
+  margin: .1rem 0 .85rem; cursor: pointer; user-select: none;
+}
+.remember-checkbox {
+  appearance: none; width: 16px; height: 16px; flex-shrink: 0;
+  border: 1.5px solid var(--border); border-radius: 4px;
+  background: var(--surface-2); cursor: pointer;
+  transition: background .14s, border-color .14s;
+  position: relative;
+}
+.remember-checkbox:checked {
+  background: var(--primary); border-color: var(--primary);
+}
+.remember-checkbox:checked::after {
+  content: ''; position: absolute; left: 4px; top: 1px;
+  width: 5px; height: 9px;
+  border: 2px solid #fff; border-top: none; border-left: none;
+  transform: rotate(45deg);
+}
+.remember-label { font-size: .875rem; color: var(--text-muted); }
 .required { color: var(--danger); }
 .radio-group { display: flex; gap: 1.2rem; padding: .45rem 0; }
 .radio-label, .checkbox-label {
@@ -606,6 +627,127 @@ a:hover { text-decoration: underline; }
   transition: opacity .26s ease, transform .26s ease;
   pointer-events: none;
 }
+
+/* ─── Per-answer feedback widget (tester ratings) ─────────────────────────── */
+.feedback-widget {
+  margin-top: .6rem;
+  padding-top: .55rem;
+  border-top: 1px dashed var(--border);
+}
+.fb-scale-row {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  flex-wrap: wrap;
+}
+.fb-scale-label {
+  font-size: .76rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.fb-scale {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: .25rem;
+}
+.fb-score {
+  width: 1.7rem;
+  height: 1.7rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: .76rem;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background .14s ease, color .14s ease, border-color .14s ease, transform .12s ease;
+}
+.fb-score:hover { border-color: hsl(var(--c-brand) / .55); color: var(--text); }
+.fb-score.selected {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+  transform: translateY(-1px);
+}
+.fb-detail {
+  margin-top: .65rem;
+  display: flex;
+  flex-direction: column;
+  gap: .55rem;
+  animation: doc-slide-in .18s ease;
+}
+.fb-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem;
+}
+.fb-tag {
+  font-size: .76rem;
+  font-weight: 500;
+  padding: .28rem .6rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background .14s ease, color .14s ease, border-color .14s ease;
+}
+.fb-tag:hover { color: var(--text); border-color: hsl(var(--c-brand) / .45); }
+.fb-tag.selected {
+  background: var(--primary-light);
+  border-color: hsl(var(--c-brand) / .55);
+  color: var(--primary);
+}
+.fb-comment {
+  width: 100%;
+  resize: vertical;
+  min-height: 2.4rem;
+  padding: .5rem .65rem;
+  font: inherit;
+  font-size: .84rem;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.fb-comment::placeholder { color: var(--text-muted); opacity: .8; }
+.fb-comment:focus { outline: none; border-color: hsl(var(--c-brand) / .6); }
+.fb-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+  flex-wrap: wrap;
+}
+.fb-saved-hint {
+  font-size: .74rem;
+  color: var(--text-muted);
+}
+.fb-done {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  margin-top: .55rem;
+  font-size: .8rem;
+  font-weight: 600;
+  color: var(--primary);
+  animation: doc-slide-in .18s ease;
+}
+.fb-check { font-weight: 800; }
+.fb-edit {
+  margin-left: .15rem;
+  font-size: .76rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.fb-edit:hover { color: var(--text); }
 
 /* ─── Structured answer card ─────────────────────────────────────────────
    One generic, data-driven card (lib/structured.js → chat-client.js renderer).
