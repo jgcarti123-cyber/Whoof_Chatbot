@@ -138,13 +138,19 @@
           </div>
         </div>
 
-        <div class="message ai-message <%= msg.escalated ? 'emergency' : '' %>">
+        <div class="message ai-message <%= msg.escalated ? 'emergency' : '' %>" data-memory-id="<%= msg.id %>"<% if (msg.fb_rating) { %> data-feedback="<%= JSON.stringify({ rating: msg.fb_rating, tags: msg.fb_tags || [], comment: msg.fb_comment || '' }) %>"<% } %>>
           <div class="ai-avatar">W</div>
           <div class="bubble-wrap">
             <% if (msg.escalated) { %>
               <div class="emergency-banner">⚠️ URGENT — See a vet or emergency clinic now</div>
             <% } %>
-            <div class="bubble markdown-content"><%= msg.answer_summary %></div>
+            <% if (msg.structured_answer) { %>
+              <div class="ai-content" data-structured="<%= JSON.stringify(msg.structured_answer) %>">
+                <div class="bubble markdown-content"><%= msg.answer_summary %></div>
+              </div>
+            <% } else { %>
+              <div class="bubble markdown-content"><%= msg.answer_summary %></div>
+            <% } %>
             <% if (msg.sources_cited && msg.sources_cited.length) { %>
               <details class="sources">
                 <summary>Sources (<%= msg.sources_cited.length %>)</summary>

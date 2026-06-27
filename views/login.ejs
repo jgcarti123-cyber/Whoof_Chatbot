@@ -76,6 +76,11 @@
                    placeholder="e.g. K8M2XP" autocomplete="off"
                    style="letter-spacing: 0.15em; text-transform: uppercase;">
           </div>
+          <label class="remember-row">
+            <input type="checkbox" id="remember_me" class="remember-checkbox">
+            <span class="remember-label">Remember me</span>
+          </label>
+
           <button type="submit" class="btn btn-primary btn-full btn-lg">Log in</button>
         </form>
 
@@ -85,6 +90,36 @@
       </div>
     </main>
   </div>
+
+<script>
+(function () {
+  var emailEl = document.getElementById('email');
+  var codeEl  = document.getElementById('access_code');
+  var remEl   = document.getElementById('remember_me');
+  var form    = document.querySelector('.auth-form');
+
+  // Restore saved credentials on load
+  var saved = null;
+  try { saved = JSON.parse(localStorage.getItem('whoof_remember') || 'null'); } catch (e) {}
+  if (saved && saved.email) {
+    emailEl.value = saved.email;
+    codeEl.value  = saved.code || '';
+    remEl.checked = true;
+  }
+
+  // Save or clear on submit
+  form.addEventListener('submit', function () {
+    if (remEl.checked) {
+      localStorage.setItem('whoof_remember', JSON.stringify({
+        email: emailEl.value.trim(),
+        code:  codeEl.value.trim(),
+      }));
+    } else {
+      localStorage.removeItem('whoof_remember');
+    }
+  });
+})();
+</script>
 
 </body>
 </html>
