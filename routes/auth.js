@@ -48,8 +48,10 @@ router.post('/logout', (req, res) => {
 });
 
 // Dev-only shortcut — skips email/code, logs straight in as the demo owner (Bruno).
-// Disabled in production so it can't be exploited.
-if (process.env.NODE_ENV !== 'production') {
+// OFF by default (incl. on any public tunnel): an attacker who finds the URL could
+// otherwise reach the demo account with no credentials. Opt in with ENABLE_DEV_LOGIN=true
+// in a trusted local .env only.
+if (process.env.ENABLE_DEV_LOGIN === 'true') {
   router.get('/dev-login', async (req, res) => {
     try {
       const result = await query(

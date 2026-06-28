@@ -11,9 +11,24 @@ const requireAuth = require('./middleware/requireAuth');
 
 const app = express();
 
+const isProd = process.env.NODE_ENV === 'production';
+
+// The session secret signs the auth cookie. In production it MUST come from the
+// environment — the dev fallback is public (it's right here in the source), so
+// shipping with it would let anyone forge a logged-in cookie. Fail fast instead.
+const sessionSecret = process.env.SESSION_SECRET
+  || (isProd ? null : 'dev-secret-change-this-in-production');
+if (!sessionSecret) {
+  throw new Error('SESSION_SECRET must be set when NODE_ENV=production.');
+}
+
 // ─── View engine ──────────────────────────────────────────────────────────────
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
+
+// Behind an HTTPS proxy (Cloudflare tunnel, Render, etc.) trust X-Forwarded-Proto
+// so `secure` cookies are actually sent and req.protocol reflects the real scheme.
+if (isProd) app.set('trust proxy', 1);
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
 app.use(express.json());
@@ -25,13 +40,14 @@ app.use(session({
     pool,
     createTableIfMissing: true, // creates a `session` table in Postgres automatically
   }),
-  secret: process.env.SESSION_SECRET || 'dev-secret-change-this-in-production',
+  secret: sessionSecret,
   resave: false,
   saveUninitialized: false,
   cookie: {
     maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
     httpOnly: true,
     sameSite: 'strict',
+    secure: isProd, // HTTPS-only cookie once deployed behind TLS
   },
 }));
 
@@ -71,7 +87,7 @@ const port = process.env.PORT || 3000;
 if (require.main === module) {
   app.listen(port, () => {
     console.log(`Whoof Vet AI listening on http://localhost:${port}`);
-    if (process.env.NODE_ENV !== 'production') {
+    if (process.env.ENABLE_DEV_LOGIN === 'true') {
       console.log(`  Dev login (Bruno): http://localhost:${port}/dev-login`);
     }
     console.log(`  Login:   http://localhost:${port}/login`);

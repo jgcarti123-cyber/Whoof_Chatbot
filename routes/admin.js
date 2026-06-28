@@ -5,6 +5,11 @@ const { query } = require('../db');
 
 const router = express.Router();
 
+// The admin dashboard exposes every tester's conversations, so in production it must
+// have an explicit secret — the dev fallback is public knowledge in this source file.
+if (process.env.NODE_ENV === 'production' && !process.env.ADMIN_SECRET) {
+  throw new Error('ADMIN_SECRET must be set when NODE_ENV=production to protect /admin.');
+}
 const ADMIN_SECRET = process.env.ADMIN_SECRET || 'whoof-admin';
 
 // Middleware: require admin session flag

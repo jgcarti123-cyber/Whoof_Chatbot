@@ -10,8 +10,10 @@
   <meta name="theme-color" content="#1A1A1A">
   <link rel="stylesheet" href="/style.css">
   <script>(function(){var t=localStorage.getItem('whoof-theme')||(window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');if(t==='light')document.documentElement.classList.add('light');})();</script>
-  <!-- marked.js for rendering markdown in AI responses -->
+  <!-- marked.js renders the model's markdown; DOMPurify strips any HTML it passes
+       through (marked does not sanitize) before it reaches innerHTML. -->
   <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.9/dist/purify.min.js"></script>
 </head>
 <body class="chat-page">
 
@@ -212,9 +214,9 @@
     });
   </script>
   <script>
-    // Render existing history messages as markdown
+    // Render existing history messages as markdown (sanitized — see renderMarkdown).
     document.querySelectorAll('.markdown-content').forEach(el => {
-      el.innerHTML = marked.parse(el.textContent || '');
+      el.innerHTML = window.renderMarkdown(el.textContent || '');
     });
     // Scroll to bottom on load
     const ma = document.getElementById('messages-area');

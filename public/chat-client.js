@@ -389,7 +389,7 @@
     } else {
       const bubble = document.createElement('div');
       bubble.className = 'bubble markdown-content';
-      bubble.innerHTML = marked.parse(data.answer || '');
+      bubble.innerHTML = renderMarkdown(data.answer || '');
       contentEl.appendChild(bubble);
     }
 
@@ -888,6 +888,16 @@
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
   }
+
+  // marked turns the model's markdown into HTML but does NOT sanitize — it passes raw
+  // HTML straight through. Run the result through DOMPurify before it touches innerHTML
+  // so a stray <script>/<img onerror> in an answer can't execute. If DOMPurify failed to
+  // load, fall back to marked-only (no worse than before — never blocks the chat).
+  function renderMarkdown(text) {
+    const html = marked.parse(text || '');
+    return window.DOMPurify ? window.DOMPurify.sanitize(html) : html;
+  }
+  window.renderMarkdown = renderMarkdown;
 
   function fmtTime(date) {
     return date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
