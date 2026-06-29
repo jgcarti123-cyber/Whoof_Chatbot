@@ -92,6 +92,8 @@ if (require.main === module) {
     }
     console.log(`  Login:   http://localhost:${port}/login`);
     console.log(`  Health:  http://localhost:${port}/health`);
+    // Initial full export of all responses to whoof-responses.xlsx (fire-and-forget).
+    require('./lib/exportExcel').writeExcel().catch(() => {});
   });
 }
 

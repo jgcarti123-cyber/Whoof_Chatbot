@@ -937,7 +937,11 @@
       (stars ? '<div class="vet-card-rating"><span class="vet-stars">' + stars + '</span>' +
         '<span class="vet-rating-num">' + escHtml(String(vet.rating)) +
         (vet.reviews ? ' (' + vet.reviews + ')' : '') + '</span></div>' : '') +
-      '<a class="vet-card-link" href="' + escHtml(vet.mapsUrl) + '" target="_blank" rel="noopener">Directions ↗</a>' +
+      '<div class="vet-card-actions">' +
+        '<a class="vet-card-link" href="' + escHtml(vet.mapsUrl) + '" target="_blank" rel="noopener">Directions ↗</a>' +
+        '<button type="button" class="vet-book-btn" data-clinic="' + escHtml(vet.name) +
+          '" data-phone="' + escHtml(vet.phone || '') + '">Draft booking</button>' +
+      '</div>' +
     '</div>';
   }
 
@@ -957,6 +961,77 @@
         '<div class="meta">' + fmtTime(new Date()) + '</div>' +
       '</div>';
     messagesArea.appendChild(el);
+    // Wire each card's "Draft booking" button (closure access to the draft helpers).
+    el.querySelectorAll('.vet-book-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        requestBookingDraft(btn.getAttribute('data-clinic'), btn.getAttribute('data-phone'), btn);
+      });
+    });
+    scrollToBottom();
+  }
+
+  // Ask the server to draft a booking message for one clinic, then render it with
+  // one-tap "Send via WhatsApp" / "Copy" actions. The reason is inferred server-side
+  // from this chat's recent turns.
+  function requestBookingDraft(clinicName, clinicPhone, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = 'Drafting…'; }
+    fetch('/api/vets/booking-draft', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        clinic_name: clinicName,
+        clinic_phone: clinicPhone || '',
+        session_id: sessionId || undefined,
+      }),
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.ok) showBookingDraft(data);
+        else showVetError(data.error || 'Could not draft a booking message.');
+      })
+      .catch(function () { showVetError('Network error — please try again.'); })
+      .finally(function () {
+        if (btn) { btn.disabled = false; btn.textContent = 'Draft booking'; }
+      });
+  }
+
+  function showBookingDraft(data) {
+    const el = document.createElement('div');
+    el.className = 'message ai-message';
+    const waBtn = data.whatsapp_url
+      ? '<a class="btn btn-primary booking-send" href="' + escHtml(data.whatsapp_url) +
+          '" target="_blank" rel="noopener">Send via WhatsApp ↗</a>'
+      : '<span class="booking-nophone">No phone number on file — copy the message and send it yourself.</span>';
+    el.innerHTML =
+      '<div class="ai-avatar">W</div>' +
+      '<div class="bubble-wrap">' +
+        '<div class="booking-card">' +
+          '<div class="booking-card-head">Booking draft for ' + escHtml(data.clinic_name) + '</div>' +
+          '<div class="booking-msg"></div>' +
+          '<div class="booking-actions">' +
+            waBtn +
+            '<button type="button" class="btn btn-ghost booking-copy">Copy message</button>' +
+          '</div>' +
+        '</div>' +
+        '<div class="meta">' + fmtTime(new Date()) + '</div>' +
+      '</div>';
+    // Set the message via textContent (never innerHTML) so it can't inject markup.
+    el.querySelector('.booking-msg').textContent = data.message;
+    messagesArea.appendChild(el);
+
+    const copyBtn = el.querySelector('.booking-copy');
+    copyBtn.addEventListener('click', function () {
+      const done = function () { copyBtn.textContent = 'Copied ✓'; setTimeout(function () { copyBtn.textContent = 'Copy message'; }, 1800); };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(data.message).then(done).catch(function () {});
+      } else {
+        // Fallback for non-secure contexts without the Clipboard API.
+        const ta = document.createElement('textarea');
+        ta.value = data.message; document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); done(); } catch (e) { /* noop */ }
+        document.body.removeChild(ta);
+      }
+    });
     scrollToBottom();
   }
 

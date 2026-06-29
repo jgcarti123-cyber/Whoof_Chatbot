@@ -11,7 +11,9 @@ const {
   detectDecision, loadActiveDecisions, saveDecision, isAffirmation, isDecline,
 } = require('../lib/decisions');
 const { findNearbyVets } = require('../lib/vetFinder');
+const { draftBookingMessage } = require('../lib/booking');
 const webSearch = require('../lib/webSearch');
+const { maybeUpdate: maybeUpdateExcel } = require('../lib/exportExcel');
 
 const router = express.Router();
 
@@ -510,6 +512,8 @@ router.post('/api/chat/message', requireAuth, async (req, res) => {
     // Roll completed (non-active) chats into the single rolling summary, after
     // responding so the owner never waits on it.
     rollUpInactiveChats(pet.id, sessionId).catch(() => {});
+    // Keep the Excel export up to date for the tracked tester account (fire-and-forget).
+    maybeUpdateExcel(req.session.ownerId).catch(() => {});
   } catch (err) {
     console.error('Chat message error:', err);
     res.status(500).json({ error: 'Failed to get a response. Please try again.' });
@@ -732,6 +736,62 @@ router.get('/api/vets/nearby', requireAuth, async (req, res) => {
     res.status(configErr ? 503 : 500).json({ error: configErr
       ? 'Vet finder is not configured yet — ask the Whoof team.'
       : 'Could not fetch nearby vets. Please try again.' });
+  }
+});
+
+// POST /api/vets/booking-draft
+// Body: { clinic_name, clinic_phone?, session_id? }
+// Drafts a short WhatsApp booking message for a clinic, using the pet profile and (when
+// a session is passed) the recent conversation to infer a visit reason. Returns the
+// message plus a wa.me deep link when the clinic's phone number is known. Whoof only
+// drafts — the owner taps send, so this works for any clinic with no integration.
+router.post('/api/vets/booking-draft', requireAuth, async (req, res) => {
+  try {
+    const clinicName = (req.body.clinic_name || '').toString().trim().slice(0, 160);
+    if (!clinicName) return res.status(400).json({ error: 'Clinic name is required.' });
+    const clinicPhone = (req.body.clinic_phone || '').toString().trim().slice(0, 40);
+
+    const petResult = await query(
+      `SELECT p.*, o.owner_name FROM pet_profile p
+       JOIN owners o ON o.id = p.owner_id
+       WHERE p.owner_id = $1 LIMIT 1`,
+      [req.session.ownerId],
+    );
+    if (!petResult.rows.length) return res.status(400).json({ error: 'No pet profile found.' });
+    const pet = petResult.rows[0];
+
+    // Pull a few recent turns of THIS chat (only if it belongs to this pet) to infer a
+    // visit reason — never another owner's session.
+    let recentHistory = [];
+    if (isUuid(req.body.session_id)) {
+      const owned = await query(
+        'SELECT id FROM conversation_session WHERE id = $1 AND pet_id = $2 LIMIT 1',
+        [req.body.session_id, pet.id],
+      );
+      if (owned.rows.length) {
+        const h = await query(
+          `SELECT owner_question, answer_summary FROM conversation_memory
+           WHERE session_id = $1 ORDER BY created_at DESC LIMIT 5`,
+          [req.body.session_id],
+        );
+        recentHistory = h.rows.reverse();
+      }
+    }
+
+    const message = await draftBookingMessage({
+      pet, ownerName: pet.owner_name || '', clinicName, recentHistory,
+    });
+
+    // wa.me wants digits with country code and no separators; strip everything else.
+    const digits = clinicPhone.replace(/[^\d]/g, '');
+    const whatsappUrl = digits.length >= 8
+      ? `https://wa.me/${digits}?text=${encodeURIComponent(message)}`
+      : null;
+
+    res.json({ ok: true, clinic_name: clinicName, message, whatsapp_url: whatsappUrl || undefined });
+  } catch (err) {
+    console.error('Booking draft error:', err);
+    res.status(500).json({ error: 'Could not draft a booking message. Please try again.' });
   }
 });
 
