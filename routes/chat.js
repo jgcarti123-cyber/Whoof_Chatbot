@@ -372,6 +372,7 @@ router.post('/api/chat/message', requireAuth, async (req, res) => {
     // RAG retrieval — KB chunks ONLY (the PDFs), never conversation transcripts.
     let chunks = [];
     let topSimilarity = 0;
+    let topCosine = 0;
     let rewrittenQuery = enriched;
 
     try {
@@ -379,6 +380,10 @@ router.post('/api/chat/message', requireAuth, async (req, res) => {
       chunks = retrieved.chunks;
       rewrittenQuery = retrieved.rewritten_query || enriched;
       topSimilarity = parseFloat(chunks[0]?.rrf_score ?? chunks[0]?.similarity ?? 0);
+      // Cosine similarity of the best chunk is the real relevance signal — RRF scores
+      // only reflect rank position (always ~0.016 at rank 1), so they can't tell a good
+      // KB match from a bad one. Cosine can: solid vet topics land ~0.70+, off-KB ~0.5.
+      topCosine = parseFloat(chunks[0]?.cosine_sim ?? 0);
     } catch (ragErr) {
       console.warn('RAG retrieval failed (proceeding without KB):', ragErr.message);
     }
@@ -387,7 +392,11 @@ router.post('/api/chat/message', requireAuth, async (req, res) => {
     // or recall ("what did we decide?") questions. The pet-vs-not gate already happened in
     // triage, so this can't turn into a general search engine. Fail-soft → [] on any error.
     const recall = isRecallQuestion(message);
-    const kbWeak = chunks.length === 0 || topSimilarity < 0.01;
+    // Cosine alone is phrasing-sensitive, so pair it with intent: questions that clearly
+    // want external/fresh facts (a phone/address, "latest/newest", prices, a year) the
+    // static KB can't hold get a higher bar before we trust the KB and skip the web.
+    const wantsExternal = /\b(phone|mobile|number|contact|email|address|website|nearby|latest|newest|recent|price|cost|how much|buy|purchase|in stock|available|recall|20(2[4-9]|3\d))\b/i.test(message);
+    const kbWeak = chunks.length === 0 || topCosine < (wantsExternal ? 0.72 : 0.6);
     let webResults = [];
     if (kbWeak && !escalated && !recall && webSearch.isConfigured()) {
       webResults = await webSearch.searchWeb(rewrittenQuery !== enriched ? rewrittenQuery : message);
