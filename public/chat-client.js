@@ -915,4 +915,127 @@
 
   // Attach rating widgets to the server-rendered history turns on page load.
   initHistoryFeedback();
+
+  // ── Vet finder ────────────────────────────────────────────────────────────
+  function buildVetCard(vet) {
+    const stars = vet.rating
+      ? '★'.repeat(Math.round(vet.rating)) + '☆'.repeat(5 - Math.round(vet.rating))
+      : null;
+    const openBadge = vet.open === true
+      ? '<span class="vet-open">Open now</span>'
+      : vet.open === false
+        ? '<span class="vet-closed">Closed</span>'
+        : '';
+
+    return '<div class="vet-card">' +
+      '<div class="vet-card-name">' + escHtml(vet.name) + openBadge + '</div>' +
+      (vet.address ? '<div class="vet-card-addr">' + escHtml(vet.address) + '</div>' : '') +
+      (stars ? '<div class="vet-card-rating"><span class="vet-stars">' + stars + '</span>' +
+        '<span class="vet-rating-num">' + escHtml(String(vet.rating)) +
+        (vet.reviews ? ' (' + vet.reviews + ')' : '') + '</span></div>' : '') +
+      '<a class="vet-card-link" href="' + escHtml(vet.mapsUrl) + '" target="_blank" rel="noopener">Directions ↗</a>' +
+    '</div>';
+  }
+
+  function showVetResults(vets) {
+    const el = document.createElement('div');
+    el.className = 'message ai-message';
+    el.innerHTML =
+      '<div class="ai-avatar">W</div>' +
+      '<div class="bubble-wrap">' +
+        '<div class="vet-results-header">Here are vets near you:</div>' +
+        '<div class="vet-results">' +
+          (vets.length
+            ? vets.map(buildVetCard).join('')
+            : '<div class="vet-empty">No vets found within 5 km. Try asking your local pet store or neighbour for a recommendation.</div>'
+          ) +
+        '</div>' +
+        '<div class="meta">' + fmtTime(new Date()) + '</div>' +
+      '</div>';
+    messagesArea.appendChild(el);
+    scrollToBottom();
+  }
+
+  function showVetError(msg) {
+    const el = document.createElement('div');
+    el.className = 'message ai-message';
+    el.innerHTML =
+      '<div class="ai-avatar">W</div>' +
+      '<div class="bubble-wrap"><div class="bubble">' + escHtml(msg) + '</div></div>';
+    messagesArea.appendChild(el);
+    scrollToBottom();
+  }
+
+  function appendUserBubble(text) {
+    const el = document.createElement('div');
+    el.className = 'message user-message';
+    el.innerHTML =
+      '<div class="bubble-wrap">' +
+        '<div class="bubble">' + escHtml(text) + '</div>' +
+        '<div class="meta">' + fmtTime(new Date()) + '</div>' +
+      '</div>';
+    messagesArea.appendChild(el);
+    scrollToBottom();
+  }
+
+  function showLocationPrompt() {
+    appendUserBubble('Find a vet nearby');
+
+    const el = document.createElement('div');
+    el.className = 'message ai-message';
+    const inner =
+      '<div class="ai-avatar">W</div>' +
+      '<div class="bubble-wrap">' +
+        '<div class="bubble">Sure! I need your location to find vets near you.</div>' +
+        '<div class="vet-location-card" id="vet-location-card">' +
+          '<button type="button" class="btn btn-primary" id="vet-share-location-btn">' +
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>' +
+            ' Share my location' +
+          '</button>' +
+          '<p class="vet-location-note">Your location is only used for this search and is never stored.</p>' +
+        '</div>' +
+        '<div class="meta">' + fmtTime(new Date()) + '</div>' +
+      '</div>';
+    el.innerHTML = inner;
+    messagesArea.appendChild(el);
+    scrollToBottom();
+
+    const shareBtn = el.querySelector('#vet-share-location-btn');
+    shareBtn.addEventListener('click', function () {
+      if (!navigator.geolocation) {
+        showVetError('Your browser does not support location sharing. Please search Google Maps for "vets near me".');
+        return;
+      }
+      shareBtn.disabled = true;
+      shareBtn.textContent = 'Locating…';
+      navigator.geolocation.getCurrentPosition(
+        function (pos) {
+          shareBtn.closest('.vet-location-card').innerHTML = '<span style="color:var(--text-muted);font-size:.85rem">Location shared ✓</span>';
+          fetch('/api/vets/nearby?lat=' + pos.coords.latitude + '&lng=' + pos.coords.longitude)
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+              if (data.ok) { showVetResults(data.vets); }
+              else { showVetError(data.error || 'Could not fetch nearby vets.'); }
+            })
+            .catch(function () { showVetError('Network error — please try again.'); });
+        },
+        function (err) {
+          shareBtn.disabled = false;
+          shareBtn.textContent = 'Share my location';
+          if (err.code === 1) {
+            showVetError('Location access was denied. Enable location in your browser settings and try again.');
+          } else {
+            showVetError('Could not get your location. Please try again.');
+          }
+        },
+        { timeout: 10000 }
+      );
+    });
+  }
+
+  // Wire up both buttons (hero quick-pill + toolbar button)
+  ['vet-finder-btn', 'vet-finder-btn-toolbar'].forEach(function (id) {
+    const btn = document.getElementById(id);
+    if (btn) btn.addEventListener('click', showLocationPrompt);
+  });
 })();

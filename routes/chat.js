@@ -10,6 +10,7 @@ const { getRollingSummary, rollUpInactiveChats } = require('../lib/memory');
 const {
   detectDecision, loadActiveDecisions, saveDecision, isAffirmation, isDecline,
 } = require('../lib/decisions');
+const { findNearbyVets } = require('../lib/vetFinder');
 
 const router = express.Router();
 
@@ -659,6 +660,27 @@ router.post('/api/chat/session/:id/decision/dismiss', requireAuth, async (req, r
   } catch (err) {
     console.error('Decision dismiss error:', err);
     res.status(500).json({ error: 'Could not dismiss offer.' });
+  }
+});
+
+// GET /api/vets/nearby?lat=&lng=&radius=
+// Returns up to 6 nearby vet clinics from Google Places. Requires GOOGLE_PLACES_API_KEY.
+router.get('/api/vets/nearby', requireAuth, async (req, res) => {
+  const lat = parseFloat(req.query.lat);
+  const lng = parseFloat(req.query.lng);
+  if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    return res.status(400).json({ error: 'Invalid coordinates.' });
+  }
+  const radius = Math.min(Math.max(parseInt(req.query.radius) || 5000, 500), 20000);
+  try {
+    const vets = await findNearbyVets(lat, lng, radius);
+    res.json({ ok: true, vets });
+  } catch (err) {
+    console.error('Vet finder error:', err.message);
+    const configErr = err.message.includes('GOOGLE_PLACES_API_KEY');
+    res.status(configErr ? 503 : 500).json({ error: configErr
+      ? 'Vet finder is not configured yet — ask the Whoof team.'
+      : 'Could not fetch nearby vets. Please try again.' });
   }
 });
 

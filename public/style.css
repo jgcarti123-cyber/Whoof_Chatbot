@@ -1263,3 +1263,59 @@ a:hover { text-decoration: underline; }
   /* No hover on touch — keep the actions tappable. */
   .session-action { opacity: 1; }
 }
+
+/* ── Vet finder ──────────────────────────────────────────────────────────── */
+.input-toolbar {
+  display: flex; gap: .4rem; padding: .35rem .75rem 0;
+}
+.toolbar-btn {
+  display: inline-flex; align-items: center; gap: .35rem;
+  padding: .3rem .7rem; border-radius: 999px; font-size: .78rem; font-weight: 600;
+  background: var(--surface); border: 1.5px solid var(--border);
+  color: var(--text-muted); cursor: pointer; transition: all .14s;
+}
+.toolbar-btn:hover { color: var(--primary); border-color: hsl(var(--c-brand)/.4); }
+
+.vet-location-card {
+  margin-top: .75rem; display: flex; flex-direction: column; align-items: flex-start; gap: .5rem;
+}
+.vet-location-note {
+  font-size: .75rem; color: var(--text-muted); margin: 0;
+}
+
+.vet-results-header {
+  font-size: .82rem; font-weight: 600; color: var(--text-muted);
+  margin-bottom: .6rem; padding: 0 .1rem;
+}
+.vet-results {
+  display: flex; flex-direction: column; gap: .55rem; min-width: 260px; max-width: 400px;
+}
+.vet-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: .75rem 1rem;
+}
+.vet-card-name {
+  font-size: .9rem; font-weight: 700; color: var(--text);
+  display: flex; align-items: center; gap: .45rem; flex-wrap: wrap;
+  margin-bottom: .2rem;
+}
+.vet-open  { font-size: .68rem; font-weight: 600; padding: .1rem .4rem; border-radius: 4px;
+  background: hsl(var(--c-success)/.15); color: hsl(var(--c-success)); }
+.vet-closed { font-size: .68rem; font-weight: 600; padding: .1rem .4rem; border-radius: 4px;
+  background: hsl(var(--c-danger)/.12); color: hsl(var(--c-danger)); }
+.vet-card-addr {
+  font-size: .8rem; color: var(--text-muted); margin-bottom: .35rem;
+}
+.vet-card-rating {
+  display: flex; align-items: center; gap: .4rem; margin-bottom: .4rem;
+}
+.vet-stars { color: #f59e0b; font-size: .82rem; letter-spacing: -.03em; }
+.vet-rating-num { font-size: .78rem; color: var(--text-muted); }
+.vet-card-link {
+  display: inline-block; font-size: .78rem; font-weight: 600;
+  color: var(--primary); text-decoration: none;
+}
+.vet-card-link:hover { text-decoration: underline; }
+.vet-empty {
+  font-size: .85rem; color: var(--text-muted); padding: .5rem 0;
+}
