@@ -162,7 +162,11 @@
                 <summary>Sources (<%= msg.sources_cited.length %>)</summary>
                 <ul>
                   <% msg.sources_cited.forEach(function(s) { %>
-                    <li><strong><%= s.source %></strong><% if (s.topic) { %> — <%= s.topic %><% } %></li>
+                    <% if (s.url) { %>
+                      <li><a href="<%= s.url %>" target="_blank" rel="noopener"><strong><%= s.source %></strong></a> <span class="src-web">web</span></li>
+                    <% } else { %>
+                      <li><strong><%= s.source %></strong><% if (s.topic) { %> — <%= s.topic %><% } %></li>
+                    <% } %>
                   <% }) %>
                 </ul>
               </details>

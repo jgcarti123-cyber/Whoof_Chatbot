@@ -351,6 +351,10 @@
            <summary>Sources (${data.sources.length})</summary>
            <ul>${data.sources.map(s => {
              const loc = [s.source, s.section].filter(Boolean).map(escHtml).join(' › ');
+             // Web sources carry a url → render as an external link.
+             if (s.url) {
+               return `<li><a href="${escHtml(s.url)}" target="_blank" rel="noopener"><strong>${loc}</strong></a> <span class="src-web">web</span></li>`;
+             }
              const pg = s.page_number ? ` (p.${s.page_number})` : '';
              return `<li><strong>${loc}</strong>${pg}${s.chunk_type && s.chunk_type !== 'body' ? ` [${escHtml(s.chunk_type)}]` : ''}</li>`;
            }).join('')}</ul>
@@ -966,20 +970,23 @@
     scrollToBottom();
   }
 
-  function appendUserBubble(text) {
-    const el = document.createElement('div');
-    el.className = 'message user-message';
-    el.innerHTML =
-      '<div class="bubble-wrap">' +
-        '<div class="bubble">' + escHtml(text) + '</div>' +
-        '<div class="meta">' + fmtTime(new Date()) + '</div>' +
-      '</div>';
-    messagesArea.appendChild(el);
-    scrollToBottom();
+  // Adopt the session the server created/returned for this vet search, so the chat
+  // shows up in the sidebar and survives a reload — same handshake as postMessage().
+  function adoptVetSession(data) {
+    if (data.session_id && data.session_id !== sessionId) {
+      sessionId = data.session_id;
+      try { history.replaceState(null, '', '/chat?session=' + sessionId); } catch (e) { /* noop */ }
+      ensureSidebarEntry(sessionId, data.session_title || 'Nearby vets');
+    }
   }
 
   function showLocationPrompt() {
-    appendUserBubble('Find a vet nearby');
+    // First action of a brand-new chat clears the hero so the conversation takes over.
+    const hero = messagesArea.querySelector('.empty-hero');
+    if (hero) hero.remove();
+
+    appendUserMessage('Find a vet nearby');
+    scrollToBottom();
 
     const el = document.createElement('div');
     el.className = 'message ai-message';
@@ -1011,10 +1018,12 @@
       navigator.geolocation.getCurrentPosition(
         function (pos) {
           shareBtn.closest('.vet-location-card').innerHTML = '<span style="color:var(--text-muted);font-size:.85rem">Location shared ✓</span>';
-          fetch('/api/vets/nearby?lat=' + pos.coords.latitude + '&lng=' + pos.coords.longitude)
+          const qs = 'lat=' + pos.coords.latitude + '&lng=' + pos.coords.longitude +
+            (sessionId ? '&session_id=' + encodeURIComponent(sessionId) : '');
+          fetch('/api/vets/nearby?' + qs)
             .then(function (r) { return r.json(); })
             .then(function (data) {
-              if (data.ok) { showVetResults(data.vets); }
+              if (data.ok) { adoptVetSession(data); showVetResults(data.vets); }
               else { showVetError(data.error || 'Could not fetch nearby vets.'); }
             })
             .catch(function () { showVetError('Network error — please try again.'); });

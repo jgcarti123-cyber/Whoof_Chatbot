@@ -1319,3 +1319,10 @@ a:hover { text-decoration: underline; }
 .vet-empty {
   font-size: .85rem; color: var(--text-muted); padding: .5rem 0;
 }
+
+/* Web-source badge in the Sources dropdown */
+.src-web {
+  font-size: .65rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  padding: .05rem .35rem; border-radius: 4px; vertical-align: middle;
+  background: var(--primary-light); color: var(--primary);
+}

@@ -11,6 +11,7 @@ const {
   detectDecision, loadActiveDecisions, saveDecision, isAffirmation, isDecline,
 } = require('../lib/decisions');
 const { findNearbyVets } = require('../lib/vetFinder');
+const webSearch = require('../lib/webSearch');
 
 const router = express.Router();
 
@@ -382,8 +383,18 @@ router.post('/api/chat/message', requireAuth, async (req, res) => {
       console.warn('RAG retrieval failed (proceeding without KB):', ragErr.message);
     }
 
+    // Web search FALLBACK: only when the KB had no good match, and never for emergencies
+    // or recall ("what did we decide?") questions. The pet-vs-not gate already happened in
+    // triage, so this can't turn into a general search engine. Fail-soft → [] on any error.
+    const recall = isRecallQuestion(message);
+    const kbWeak = chunks.length === 0 || topSimilarity < 0.01;
+    let webResults = [];
+    if (kbWeak && !escalated && !recall && webSearch.isConfigured()) {
+      webResults = await webSearch.searchWeb(rewrittenQuery !== enriched ? rewrittenQuery : message);
+    }
+
     const systemPrompt = buildSystemPrompt(pet, chunks, recentHistory, breedInfo, {
-      clarifications, decisions, rollingSummary, ownerName: pet.owner_name || '',
+      clarifications, decisions, rollingSummary, ownerName: pet.owner_name || '', webResults,
     });
 
     // Generate the answer and (for a brand-new chat) a summary title in parallel.
@@ -403,11 +414,11 @@ router.post('/api/chat/message', requireAuth, async (req, res) => {
     // A structured card now only ever comes from the /visualise command.
     const structuredTrigger = structuredAnswer ? 'command' : null;
 
-    // Sources + confidence attach ONLY to KB-grounded clinical answers — never to a
-    // recall ("what did we decide?") answer, and never when retrieval was too weak.
-    const recall = isRecallQuestion(message);
-    const usedFallback = chunks.length === 0 || topSimilarity < 0.01;
+    // Sources + confidence attach ONLY to grounded clinical answers — never to a
+    // recall ("what did we decide?") answer.
+    const usedFallback = kbWeak;
     const kbGrounded = !usedFallback && !recall;
+    const webGrounded = usedFallback && !recall && webResults.length > 0;
 
     let confidenceLevel = null;
     let sourcesCited = [];
@@ -421,6 +432,10 @@ router.post('/api/chat/message', requireAuth, async (req, res) => {
         page_number: c.page_number || null,
         rrf_score: parseFloat(parseFloat(c.rrf_score ?? c.similarity ?? 0).toFixed(4)),
       }));
+    } else if (webGrounded) {
+      // Cite the web pages, with a `url` so the UI can render them as links.
+      confidenceLevel = 'medium';
+      sourcesCited = webResults.map(w => ({ source: w.title, url: w.url, topic: 'web' }));
     }
 
     // Proactively offer to save a finalized decision. Skipped for emergencies and
@@ -470,7 +485,8 @@ router.post('/api/chat/message', requireAuth, async (req, res) => {
       escalated,
       escalation_reason: escalationReason,
       confidence_level: confidenceLevel,
-      used_fallback: usedFallback && !recall && !decisionOffer && !structuredAnswer,
+      used_fallback: usedFallback && !recall && !decisionOffer && !structuredAnswer && !webGrounded,
+      web_grounded: webGrounded || undefined,
       decision_offer: decisionOffer,
       offer_title: offerTitle || undefined,
       offer_type: offerType || undefined,
@@ -674,7 +690,33 @@ router.get('/api/vets/nearby', requireAuth, async (req, res) => {
   const radius = Math.min(Math.max(parseInt(req.query.radius) || 5000, 500), 20000);
   try {
     const vets = await findNearbyVets(lat, lng, radius);
-    res.json({ ok: true, vets });
+
+    // Persist as a chat turn so the search shows up in the sidebar and survives a
+    // reload — same session handshake as a normal message. The live UI renders rich
+    // cards; the stored markdown is what re-renders on reload.
+    let sessionId = null;
+    let sessionTitle;
+    const pet = await petForOwner(req.session.ownerId);
+    if (pet) {
+      const session = await resolveSession(pet.id, req.query.session_id, 'Find a vet nearby');
+      sessionId = session.id;
+      if (session.created) {
+        sessionTitle = 'Nearby vets';
+        await query('UPDATE conversation_session SET title = $2 WHERE id = $1', [sessionId, sessionTitle]);
+      }
+      const answer = vets.length
+        ? 'Here are veterinary clinics near you:\n\n' + vets.map((v, i) =>
+            `${i + 1}. **${v.name}**` +
+            (v.rating ? ` — ⭐ ${v.rating}${v.reviews ? ` (${v.reviews})` : ''}` : '') +
+            (v.open === true ? ' · Open now' : v.open === false ? ' · Closed' : '') +
+            (v.address ? `\n${v.address}` : '') +
+            `\n[Directions](${v.mapsUrl})`,
+          ).join('\n\n')
+        : 'I couldn’t find any vets within range. Try asking your local pet store or a neighbour for a recommendation.';
+      await persistTurn({ petId: pet.id, sessionId, message: 'Find a vet nearby', answer });
+    }
+
+    res.json({ ok: true, vets, session_id: sessionId || undefined, session_title: sessionTitle });
   } catch (err) {
     console.error('Vet finder error:', err.message);
     const configErr = err.message.includes('GOOGLE_PLACES_API_KEY');
