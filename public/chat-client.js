@@ -895,6 +895,19 @@
       .replace(/"/g, '&quot;');
   }
 
+  // Open every external link in a new tab (and harden it) so a tap on an answer's link —
+  // e.g. a booking "Open WhatsApp →" wa.me link — doesn't navigate away from the chat.
+  // Registered once; applies to all DOMPurify-sanitized markdown.
+  if (window.DOMPurify && !window.__WHOOF_LINK_HOOK__) {
+    window.DOMPurify.addHook('afterSanitizeAttributes', function (node) {
+      if (node.tagName === 'A' && node.getAttribute('href')) {
+        node.setAttribute('target', '_blank');
+        node.setAttribute('rel', 'noopener noreferrer');
+      }
+    });
+    window.__WHOOF_LINK_HOOK__ = true;
+  }
+
   // marked turns the model's markdown into HTML but does NOT sanitize — it passes raw
   // HTML straight through. Run the result through DOMPurify before it touches innerHTML
   // so a stray <script>/<img onerror> in an answer can't execute. If DOMPurify failed to

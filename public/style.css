@@ -518,6 +518,30 @@ a:hover { text-decoration: underline; }
 .markdown-content li { margin-bottom: .2rem; }
 .markdown-content strong { font-weight: 600; }
 .markdown-content code { font-size: .87em; background: var(--surface-2); padding: .1em .35em; border-radius: 4px; }
+.markdown-content blockquote {
+  margin: .5rem 0;
+  padding: .55rem .8rem;
+  border-left: 3px solid var(--border);
+  background: var(--surface-2);
+  border-radius: 0 8px 8px 0;
+  color: var(--text);
+  font-style: normal;
+}
+/* A WhatsApp booking link in an answer renders as a tappable green pill button. */
+.markdown-content a[href^="https://wa.me"] {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  margin: .15rem 0;
+  padding: .5rem .95rem;
+  border-radius: 999px;
+  background: #25d366;
+  color: #06310f;
+  font-weight: 600;
+  text-decoration: none;
+  transition: filter .15s ease;
+}
+.markdown-content a[href^="https://wa.me"]:hover { filter: brightness(1.07); text-decoration: none; }
 
 /* Input area — floating composer dock centered on the chat canvas. */
 .input-area {

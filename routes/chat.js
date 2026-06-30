@@ -4,14 +4,15 @@ const express = require('express');
 const requireAuth = require('../middleware/requireAuth');
 const { query } = require('../db');
 const { retrieveChunks, lookupBreed } = require('../lib/rag');
-const { buildSystemPrompt, generateAnswer, generateRoutedAnswer, generateSessionTitle } = require('../lib/llm');
+const { buildSystemPrompt, generateAnswer, toStructuredCard, generateSessionTitle } = require('../lib/llm');
 const { triageQuestion } = require('../lib/triage');
 const { getRollingSummary, rollUpInactiveChats } = require('../lib/memory');
 const {
   detectDecision, loadActiveDecisions, saveDecision, isAffirmation, isDecline,
 } = require('../lib/decisions');
-const { findNearbyVets, findNearbyPlaces, isValidCategory: isValidPlaceCategory } = require('../lib/vetFinder');
+const { findNearbyVets, findNearbyPlaces, searchPlaceByText, isValidCategory: isValidPlaceCategory } = require('../lib/vetFinder');
 const { draftBookingMessage } = require('../lib/booking');
+const { looksLikeBooking, detectBookingRequest } = require('../lib/bookingIntent');
 const { generateVetSummaries } = require('../lib/vetSummary');
 const webSearch = require('../lib/webSearch');
 const { maybeUpdate: maybeUpdateExcel } = require('../lib/exportExcel');
@@ -43,6 +44,11 @@ function parseFormatCommand(text) {
 // memory — they must NOT carry KB sources or a confidence tag.
 const RECALL_RE = /\b(we (decided|agreed|chose|settled|discussed|talked about|came up with)|last (time|chat|session|conversation)|previous(ly)?( chat| session| conversation| time)?|earlier (chat|session|conversation|today|on)|you (said|told me|recommended|suggested|mentioned)|the (plan|diet|routine|advice) (we|you)|what (was|did|were|have) .*(decide|agree|recommend|settle|plan|discuss)|remember (when|that|the)|on record|saved (plan|diet|decision))\b/i;
 const isRecallQuestion = (text) => RECALL_RE.test(text || '');
+
+// "/visualise the previous answer", "this answer", "the earlier question" → the owner
+// wants the LAST thing said laid out, not a fresh answer. Matched only when a structured
+// command is active, so it can't hijack a normal message.
+const REFERS_PREVIOUS_RE = /\b(previous|last|earlier|above|prior)\b[\s\S]{0,20}\b(answer|response|reply|message|recipe|plan|question|one|thing|info|steps?)\b|\b(this|that)\s+(answer|response|reply|one)\b|^\s*(this|that|it)\s*$/i;
 
 // Fetch an existing session (with its pending offer) without creating one.
 async function fetchSession(petId, id) {
@@ -294,6 +300,16 @@ router.post('/api/chat/message', requireAuth, async (req, res) => {
       }
     }
 
+    // ── Vet booking request? ───────────────────────────────────────────────────
+    // "Book a vet appointment", "help booking Maxpetz", etc. → draft a WhatsApp
+    // message instead of letting the model refuse it as "not my job". The cheap regex
+    // gate keeps this off the normal path; the handler re-confirms with the model and
+    // returns false (falls through to a normal answer) if it's not really a booking.
+    if (clarifications.length === 0 && looksLikeBooking(message)) {
+      const handled = await handleBookingRequest({ req, res, pet, message, rawMessage });
+      if (handled) return;
+    }
+
     // Enriched text includes clarifying answers (used for emergency check + retrieval)
     const enriched = enrichMessage(message, clarifications);
 
@@ -365,6 +381,14 @@ router.post('/api/chat/message', requireAuth, async (req, res) => {
     );
     const recentHistory = histResult.rows.reverse();
 
+    // "/visualise the previous answer" / "this answer" → don't run retrieval on the words
+    // "the previous answer" (that fetches unrelated KB chunks). Instead recast the most
+    // recent assistant turn into a card. Only meaningful with a forced structured command.
+    const refersToPrevious = forceStructured && REFERS_PREVIOUS_RE.test(message);
+    const recastText = (refersToPrevious && recentHistory.length)
+      ? (recentHistory[recentHistory.length - 1].answer_summary || null)
+      : null;
+
     // Cross-session memory, injected as plain fact: locked decisions + one rolling
     // summary. No vector search over conversations — these are stated, not retrieved.
     const [decisions, rollingSummary] = await Promise.all([
@@ -378,17 +402,21 @@ router.post('/api/chat/message', requireAuth, async (req, res) => {
     let topCosine = 0;
     let rewrittenQuery = enriched;
 
-    try {
-      const retrieved = await retrieveChunks(enriched, 5);
-      chunks = retrieved.chunks;
-      rewrittenQuery = retrieved.rewritten_query || enriched;
-      topSimilarity = parseFloat(chunks[0]?.rrf_score ?? chunks[0]?.similarity ?? 0);
-      // Cosine similarity of the best chunk is the real relevance signal — RRF scores
-      // only reflect rank position (always ~0.016 at rank 1), so they can't tell a good
-      // KB match from a bad one. Cosine can: solid vet topics land ~0.70+, off-KB ~0.5.
-      topCosine = parseFloat(chunks[0]?.cosine_sim ?? 0);
-    } catch (ragErr) {
-      console.warn('RAG retrieval failed (proceeding without KB):', ragErr.message);
+    // Skip retrieval entirely for a recast — we're reformatting an answer we already gave,
+    // not answering a new question, so there's nothing to look up (and no web fallback).
+    if (!recastText) {
+      try {
+        const retrieved = await retrieveChunks(enriched, 5);
+        chunks = retrieved.chunks;
+        rewrittenQuery = retrieved.rewritten_query || enriched;
+        topSimilarity = parseFloat(chunks[0]?.rrf_score ?? chunks[0]?.similarity ?? 0);
+        // Cosine similarity of the best chunk is the real relevance signal — RRF scores
+        // only reflect rank position (always ~0.016 at rank 1), so they can't tell a good
+        // KB match from a bad one. Cosine can: solid vet topics land ~0.70+, off-KB ~0.5.
+        topCosine = parseFloat(chunks[0]?.cosine_sim ?? 0);
+      } catch (ragErr) {
+        console.warn('RAG retrieval failed (proceeding without KB):', ragErr.message);
+      }
     }
 
     // Web search FALLBACK: only when the KB had no good match, and never for emergencies
@@ -401,7 +429,7 @@ router.post('/api/chat/message', requireAuth, async (req, res) => {
     const wantsExternal = /\b(phone|mobile|number|contact|email|address|website|nearby|latest|newest|recent|price|cost|how much|buy|purchase|in stock|available|recall|20(2[4-9]|3\d))\b/i.test(message);
     const kbWeak = chunks.length === 0 || topCosine < (wantsExternal ? 0.72 : 0.6);
     let webResults = [];
-    if (kbWeak && !escalated && !recall && webSearch.isConfigured()) {
+    if (kbWeak && !escalated && !recall && !recastText && webSearch.isConfigured()) {
       webResults = await webSearch.searchWeb(rewrittenQuery !== enriched ? rewrittenQuery : message);
     }
 
@@ -409,20 +437,35 @@ router.post('/api/chat/message', requireAuth, async (req, res) => {
       clarifications, decisions, rollingSummary, ownerName: pet.owner_name || '', webResults,
     });
 
-    // Generate the answer and (for a brand-new chat) a summary title in parallel.
+    // Generate the answer and (for a brand-new chat) a summary title.
     // Cards are OPT-IN: only an explicit /visualise slash command (forceStructured)
     // produces a structured card. Every other message — and every emergency — is plain
     // text. `answer` is always the canonical text (a structured reply's fallbackText)
     // so every downstream path works unchanged.
-    const [routed, sessionTitle] = await Promise.all([
-      forceStructured && !escalated
-        ? generateRoutedAnswer(systemPrompt, message, { force: 'structured' })
-        : generateAnswer(systemPrompt, message).then(text => ({ modality: 'text', text })),
-      session.created ? applySessionTitle(sessionId, message) : Promise.resolve(null),
-    ]);
-    const answer = routed.text;
-    const structuredAnswer = routed.structured || null;
-    const responseModality = routed.modality || 'text';
+    //
+    // /visualise = answer as TEXT on the big model, then lay it out as a card on the FAST
+    // model (toStructuredCard). This avoids the heavy forced-structured call that 429s on
+    // Groq's per-minute token limit and silently degrades to plain text. A recast reuses
+    // the previous answer's text directly, so it needs no big-model call at all.
+    let answer, structuredAnswer = null, responseModality = 'text', sessionTitle = null;
+    if (forceStructured && !escalated) {
+      const baseText = recastText || await generateAnswer(systemPrompt, message);
+      const [card, title] = await Promise.all([
+        toStructuredCard({ pet, text: baseText }),
+        session.created ? applySessionTitle(sessionId, message) : Promise.resolve(null),
+      ]);
+      structuredAnswer = card;
+      answer = card.fallbackText || baseText;
+      responseModality = 'structured';
+      sessionTitle = title;
+    } else {
+      const [text, title] = await Promise.all([
+        generateAnswer(systemPrompt, message),
+        session.created ? applySessionTitle(sessionId, message) : Promise.resolve(null),
+      ]);
+      answer = text;
+      sessionTitle = title;
+    }
     // A structured card now only ever comes from the /visualise command.
     const structuredTrigger = structuredAnswer ? 'command' : null;
 
@@ -809,6 +852,123 @@ router.post('/api/vets/booking-draft', requireAuth, async (req, res) => {
 function whatsappLink(phone, text) {
   const digits = (phone || '').replace(/[^\d]/g, '');
   return digits.length >= 8 ? `https://wa.me/${digits}?text=${encodeURIComponent(text)}` : null;
+}
+
+// Loose clinic-name match: case/punctuation-insensitive. Matches when one name contains
+// the other ("Maxpetz" ⊂ "Maxpetz Pet Clinic"), or when both share the same distinctive
+// brand word after dropping generic vet words ("Maxpetz Pet Clinic" ↔ "Maxpetz Jubilee
+// Hills"). The generic-word filter stops a shared area/word like "Jubilee" or "Clinic"
+// from matching two different clinics.
+const CLINIC_STOPWORDS = new Set([
+  'pet', 'pets', 'clinic', 'vet', 'vets', 'veterinary', 'hospital', 'care', 'centre',
+  'center', 'animal', 'animals', 'dr', 'the', 'in', 'at', 'and', 'for', 'of', 'dog', 'dogs',
+]);
+function clinicMatches(a, b) {
+  const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const x = norm(a), y = norm(b);
+  if (!x || !y) return false;
+  if (x.includes(y) || y.includes(x)) return true;
+  const sig = (s) => s.split(' ').filter(t => t.length >= 3 && !CLINIC_STOPWORDS.has(t));
+  const sa = sig(x), sb = sig(y);
+  return sa.length > 0 && sb.length > 0 && sa[0] === sb[0];
+}
+
+// Handle an in-chat vet-booking request end to end: confirm the intent, resolve the
+// clinic's phone (saved vet first, else a Google Places lookup), draft a WhatsApp
+// message, and reply with a one-tap wa.me link. Returns true if it owned the response,
+// or false to let the normal answer path handle the message (not actually a booking).
+async function handleBookingRequest({ req, res, pet, message, rawMessage }) {
+  // Recent turns of THIS session (only if it's a real, owned session) — lets the model
+  // resolve "this place" / "the first one" and gives the draft a visit reason.
+  let recentHistory = [];
+  if (isUuid(req.body.session_id)) {
+    const owned = await query(
+      'SELECT id FROM conversation_session WHERE id = $1 AND pet_id = $2 LIMIT 1',
+      [req.body.session_id, pet.id],
+    );
+    if (owned.rows.length) {
+      const h = await query(
+        `SELECT owner_question, answer_summary FROM conversation_memory
+         WHERE session_id = $1 ORDER BY created_at DESC LIMIT 5`,
+        [req.body.session_id],
+      );
+      recentHistory = h.rows.reverse();
+    }
+  }
+
+  const savedVets = Array.isArray(pet.vets) ? pet.vets : [];
+  const detect = await detectBookingRequest({ message, recentHistory, savedVets });
+  if (!detect.wants_booking) return false; // not a booking → fall through to normal answer
+
+  // Commit to a session only now that we know it's a booking (avoids creating an empty
+  // chat for a message that turns out to be something else).
+  const session = await resolveSession(pet.id, req.body.session_id, message);
+  const sessionId = session.id;
+  const sessionTitle = session.created ? await applySessionTitle(sessionId, message) : null;
+
+  const clinicName = detect.clinic_name;
+  let answer;
+
+  if (!clinicName) {
+    // No clinic identified yet → ask which one, surfacing saved vets as quick options.
+    const saved = savedVets.filter(v => v.clinic || v.name);
+    answer = saved.length
+      ? `Happy to help you book an appointment for ${pet.name}. Which clinic — ` +
+        saved.map(v => `**${v.clinic || v.name}**`).join(', ') +
+        `, or somewhere else? Tell me the name and I'll draft a WhatsApp message you can send.`
+      : `Happy to help you book an appointment for ${pet.name}. Just tell me the clinic ` +
+        `(e.g. "book at Maxpetz, Jubilee Hills") and I'll draft a WhatsApp message you can send.`;
+  } else {
+    // Resolve a phone: a saved vet first (no API call), else a Google Places text lookup.
+    let phone = null;
+    let mapsUrl = null;
+    const matchSaved = savedVets.find(v =>
+      clinicMatches(v.clinic, clinicName) || clinicMatches(v.name, clinicName));
+    if (matchSaved && matchSaved.phone) {
+      phone = matchSaved.phone;
+    } else {
+      try {
+        const place = await searchPlaceByText(`${clinicName} veterinary clinic`);
+        if (place) { phone = place.phone; mapsUrl = place.mapsUrl; }
+      } catch (e) {
+        console.warn('Booking place lookup failed:', e.message);
+      }
+    }
+
+    const draft = await draftBookingMessage({
+      pet, ownerName: pet.owner_name || '', clinicName, recentHistory,
+    });
+    const oneLineDraft = draft.replace(/\s*\n+\s*/g, ' ').trim();
+    const waUrl = whatsappLink(phone, draft);
+
+    if (waUrl) {
+      answer =
+        `Here's a ready-to-send booking request for **${clinicName}** — tap to open WhatsApp ` +
+        `with the message filled in:\n\n` +
+        `> ${oneLineDraft}\n\n` +
+        `[Open WhatsApp →](${waUrl})\n\n` +
+        `_I only draft it — give it a quick read and tap send when you're happy._`;
+    } else {
+      const mapLine = mapsUrl ? `\n\n[Find ${clinicName} on Google Maps →](${mapsUrl})` : '';
+      answer =
+        `I've drafted a booking message for **${clinicName}**, but I couldn't find a phone ` +
+        `number to build the WhatsApp link. Add the clinic's number under MY VET (or paste it ` +
+        `here) and I'll turn this into a one-tap link:\n\n` +
+        `> ${oneLineDraft}` + mapLine;
+    }
+  }
+
+  const mem = await persistTurn({ petId: pet.id, sessionId, message: rawMessage, answer });
+  res.json({
+    answer,
+    sources: [], escalated: false, confidence_level: null,
+    session_id: sessionId,
+    session_title: sessionTitle || undefined,
+    memory_id: mem.id, created_at: mem.created_at,
+  });
+  rollUpInactiveChats(pet.id, sessionId).catch(() => {});
+  maybeUpdateExcel(req.session.ownerId).catch(() => {});
+  return true;
 }
 
 // Normalise a client-supplied vets array: cap the count, sanitise each entry, drop
