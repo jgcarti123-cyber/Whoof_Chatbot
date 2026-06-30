@@ -48,11 +48,13 @@
   // ── Slash-command hint ─────────────────────────────────────────────────────
   // Typing "/vis" surfaces a small menu suggesting /visualise, so the override is
   // discoverable. Purely additive — it never intercepts Enter or the send flow.
-  const inputArea = document.querySelector('.input-area');
+  // Anchor the hint to the centred composer row (not the full-width input-area), so it
+  // sits directly above the input bar instead of floating off to the far left.
+  const composerRow = document.querySelector('.input-row') || document.querySelector('.input-area');
   const slashHint = document.createElement('div');
   slashHint.className = 'slash-hint';
   slashHint.hidden = true;
-  if (inputArea) inputArea.appendChild(slashHint);
+  if (composerRow) composerRow.appendChild(slashHint);
 
   function hideSlashHint() {
     slashHint.hidden = true;

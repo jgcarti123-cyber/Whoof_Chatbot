@@ -300,7 +300,42 @@ a:hover { text-decoration: underline; }
 }
 .chat-header-left { display: flex; align-items: center; gap: 1rem; }
 .chat-pet-name { font-size: .88rem; color: var(--text-muted); }
-.chat-header-right { display: flex; align-items: center; gap: .5rem; }
+.chat-header-right {
+  --header-control-h: 36px;
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+}
+.chat-header-right .theme-toggle,
+.chat-header-right .btn-sm {
+  height: var(--header-control-h);
+  min-height: var(--header-control-h);
+  border-radius: 12px;
+  border-width: 1.5px;
+  border-color: var(--border);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  box-shadow: inset 0 1px 0 hsl(0 0% 100% / .04);
+}
+.chat-header-right .theme-toggle {
+  width: var(--header-control-h);
+}
+.chat-header-right .btn-sm {
+  padding: 0 1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: .84rem;
+  font-weight: 600;
+  line-height: 1;
+}
+.chat-header-right .theme-toggle:hover,
+.chat-header-right .btn-sm:hover {
+  background: var(--surface);
+  border-color: hsl(var(--c-brand) / .36);
+  color: var(--text);
+  text-decoration: none;
+}
 
 /* Shell = sessions sidebar + chat column */
 .chat-shell { display: flex; flex: 1; overflow: hidden; }
@@ -369,17 +404,14 @@ a:hover { text-decoration: underline; }
 /* Individual message */
 .message { display: flex; gap: .75rem; max-width: 78%; }
 .user-message { align-self: flex-end; flex-direction: row-reverse; }
-.ai-message { align-self: flex-start; }
+/* AI replies fill the full (centred) column as plain text — no avatar, no box —
+   so a long answer reads like a document, not a cramped chat bubble. Rich replies
+   (cards, summaries, /visualise) keep their own box via their own classes. */
+.ai-message { align-self: stretch; display: block; max-width: 100%; }
 
-.ai-avatar {
-  flex-shrink: 0; width: 36px; height: 36px;
-  background: var(--brand-gradient); color: #fff;
-  border-radius: 50%;
-  font-size: .7rem; font-weight: 700; letter-spacing: -.03em;
-  display: flex; align-items: center; justify-content: center;
-  margin-top: .15rem;
-  box-shadow: var(--brand-glow-sm);
-}
+/* Avatar removed for the clean full-width answer style (kept in markup, hidden here). */
+.ai-avatar { display: none; }
+
 .bubble-wrap { display: flex; flex-direction: column; gap: .3rem; }
 .bubble {
   padding: .75rem 1rem;
@@ -392,9 +424,11 @@ a:hover { text-decoration: underline; }
   border-bottom-right-radius: 4px;
 }
 .ai-message .bubble {
-  background: var(--white);
-  border: 1px solid var(--border);
-  border-bottom-left-radius: 4px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  border-radius: 0;
+  font-size: .95rem; line-height: 1.6;
 }
 .meta {
   font-size: .75rem; color: var(--text-muted); padding: 0 .25rem;
@@ -402,8 +436,12 @@ a:hover { text-decoration: underline; }
 }
 .user-message .meta { justify-content: flex-end; }
 
-/* Emergency */
-.ai-message.emergency .bubble { border-color: var(--danger-border); background: var(--danger-bg); }
+/* Emergency — the red banner above carries the weight; add a left accent on the text
+   so it still reads as urgent now that the box is gone. */
+.ai-message.emergency .bubble {
+  border-left: 3px solid var(--danger);
+  padding-left: .9rem;
+}
 .emergency-banner {
   background: var(--danger); color: #fff;
   padding: .55rem 1rem; border-radius: 8px;
@@ -481,60 +519,95 @@ a:hover { text-decoration: underline; }
 .markdown-content strong { font-weight: 600; }
 .markdown-content code { font-size: .87em; background: var(--surface-2); padding: .1em .35em; border-radius: 4px; }
 
-/* Input area — one cohesive rounded bar: sparkle · textarea · gradient send */
+/* Input area — floating composer dock centered on the chat canvas. */
 .input-area {
   position: relative;
   flex-shrink: 0;
-  border-top: 1px solid var(--border);
-  background: var(--bg);
-  padding: .9rem max(1.5rem, calc((100% - 820px) / 2)) 1rem;
+  --composer-nudge-x: -44px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: linear-gradient(180deg, transparent 0%, hsl(var(--c-bg) / .72) 42%, hsl(var(--c-bg)) 100%);
+  padding: .55rem max(1.25rem, calc((100% - 760px) / 2)) 1rem;
+}
+.input-area::before {
+  content: "";
+  position: absolute;
+  left: calc(50% + var(--composer-nudge-x));
+  bottom: .8rem;
+  width: min(620px, calc(100% - 3rem));
+  height: 46px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: radial-gradient(50% 120% at 50% 50%, hsl(var(--c-brand) / .2), transparent 70%);
+  filter: blur(22px);
+  opacity: .75;
+  pointer-events: none;
 }
 .input-wrap {
-  display: flex; gap: .5rem; align-items: flex-end;
-  background: var(--surface);
-  border: 1.5px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: .4rem .4rem .4rem .85rem;
-  transition: border-color .15s, box-shadow .15s;
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  display: flex;
+  gap: .45rem;
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  padding: .18rem .22rem .18rem .25rem;
+  box-shadow: none;
+  transition: box-shadow .15s;
 }
 .input-wrap:focus-within {
-  border-color: hsl(var(--c-brand) / .7);
-  box-shadow: var(--focus-ring);
+  box-shadow: none;
 }
 .input-spark {
   flex-shrink: 0; display: flex; align-items: center;
-  color: hsl(var(--c-brand)); padding-bottom: .55rem;
+  color: hsl(var(--c-brand));
 }
 #message-input {
   flex: 1; border: none; background: transparent; color: var(--text);
-  padding: .5rem 0;
-  font-size: .95rem; font-family: inherit;
+  padding: .38rem 0;
+  font-size: .9rem; font-family: inherit;
   resize: none; max-height: 160px; overflow-y: auto;
   line-height: 1.5;
 }
 #message-input:focus { outline: none; box-shadow: none; }
 #message-input::placeholder { color: var(--text-muted); opacity: .85; }
 .send-btn {
-  flex-shrink: 0; width: 40px; height: 40px;
+  flex-shrink: 0; width: 38px; height: 38px;
   padding: 0; border: none; border-radius: 50%;
   display: inline-flex; align-items: center; justify-content: center;
   background: var(--brand-gradient); color: #fff;
-  cursor: pointer; box-shadow: var(--brand-glow-sm);
+  cursor: pointer;
+  box-shadow:
+    0 0 0 1px hsl(0 0% 100% / .16) inset,
+    0 10px 28px hsl(var(--c-brand) / .38);
   transition: transform .12s, box-shadow .15s, opacity .15s;
 }
-.send-btn:hover { transform: translateY(-1px); box-shadow: var(--brand-glow); }
+.send-btn:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 0 0 1px hsl(0 0% 100% / .2) inset,
+    0 14px 34px hsl(var(--c-brand) / .48);
+}
 .send-btn:active { transform: translateY(0); }
 .send-btn:disabled { opacity: .45; cursor: default; box-shadow: none; transform: none; }
 .input-disclaimer {
   font-size: .73rem; color: var(--text-muted);
-  margin-top: .5rem; text-align: center;
+  position: relative;
+  z-index: 1;
+  width: min(920px, 100%);
+  margin-top: .5rem;
+  text-align: center;
+  transform: translateX(var(--composer-nudge-x));
 }
 
 /* ─── Slash-command hint menu (typeahead above the input) ────────────────── */
 .slash-hint {
   position: absolute;
-  left: 1.5rem;
-  bottom: calc(100% - .6rem);
+  left: 0;
+  bottom: calc(100% + .5rem);
   z-index: 20;
   min-width: 280px;
   background: var(--surface);
@@ -1278,14 +1351,64 @@ a:hover { text-decoration: underline; }
   .vet-panel-body { max-width: 280px; }
 }
 
-/* ── Vet finder — icon button inline in the chat bar (left side) ──────────── */
-.input-icon-btn {
-  flex-shrink: 0; width: 34px; height: 34px; margin-bottom: .2rem;
-  display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 50%; background: transparent; border: 1.5px solid var(--border);
-  color: var(--text-muted); cursor: pointer; transition: all .14s;
+/* ── Composer dock actions ───────────────────────────────────────────────── */
+.input-row {
+  position: relative;
+  z-index: 1;
+  width: min(760px, 100%);
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: .38rem;
+  margin: 0 auto;
+  padding: .3rem;
+  transform: translateX(var(--composer-nudge-x));
+  border-radius: 999px;
+  border: 1px solid hsl(0 0% 100% / .09);
+  background:
+    linear-gradient(180deg, hsl(0 0% 100% / .075), hsl(0 0% 100% / .035)),
+    hsl(var(--c-surface) / .94);
+  box-shadow:
+    0 22px 70px rgba(0,0,0,.42),
+    0 0 0 1px hsl(var(--c-brand) / .18),
+    inset 0 1px 0 hsl(0 0% 100% / .08);
+  backdrop-filter: blur(18px) saturate(1.1);
 }
-.input-icon-btn:hover { color: var(--primary); border-color: hsl(var(--c-brand)/.45); background: var(--primary-light); }
+.find-btn {
+  flex-shrink: 0;
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  gap: .42rem;
+  padding: 0 .9rem;
+  border-radius: 999px;
+  background: hsl(0 0% 100% / .045);
+  border: 1px solid hsl(0 0% 100% / .1);
+  color: var(--text);
+  font-size: .88rem;
+  font-weight: 650;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 hsl(0 0% 100% / .06);
+  transition: border-color .15s, background .15s, transform .12s;
+}
+.find-btn svg { color: var(--primary); }
+.find-btn:hover {
+  border-color: hsl(var(--c-brand) / .45);
+  background: hsl(var(--c-brand) / .12);
+  transform: translateY(-1px);
+}
+
+@media (max-width: 640px) {
+  .input-area { --composer-nudge-x: 0px; }
+  .input-area { padding: .55rem .8rem .85rem; }
+  .input-area::before { width: calc(100% - 2rem); }
+  .input-row { min-height: 60px; padding: .32rem; gap: .25rem; }
+  .find-btn { min-height: 46px; width: 46px; padding: 0; justify-content: center; }
+  .find-btn span { display: none; }
+  .input-wrap { min-height: 48px; }
+  .input-spark { display: none; }
+  .send-btn { width: 42px; height: 42px; }
+}
 
 .vet-location-card {
   margin-top: .75rem; display: flex; flex-direction: column; align-items: flex-start; gap: .5rem;
@@ -1414,7 +1537,8 @@ body.resizing-sidebar { cursor: col-resize; user-select: none; }
 .vet-panel-head:hover { color: var(--text); background: var(--surface-2); }
 .vet-panel-title {
   display: flex; align-items: center; gap: .4rem;
-  font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+  font-size: .72rem; font-weight: 800; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--primary);    /* only the "MY VET" label text is brand-coloured */
 }
 .vet-count {
   font-size: .66rem; font-weight: 700; min-width: 1.1rem; height: 1.1rem; padding: 0 .3rem;
