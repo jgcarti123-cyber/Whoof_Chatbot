@@ -10,8 +10,9 @@ const { getRollingSummary, rollUpInactiveChats } = require('../lib/memory');
 const {
   detectDecision, loadActiveDecisions, saveDecision, isAffirmation, isDecline,
 } = require('../lib/decisions');
-const { findNearbyVets } = require('../lib/vetFinder');
+const { findNearbyVets, findNearbyPlaces, isValidCategory: isValidPlaceCategory } = require('../lib/vetFinder');
 const { draftBookingMessage } = require('../lib/booking');
+const { generateVetSummaries } = require('../lib/vetSummary');
 const webSearch = require('../lib/webSearch');
 const { maybeUpdate: maybeUpdateExcel } = require('../lib/exportExcel');
 
@@ -692,17 +693,26 @@ router.post('/api/chat/session/:id/decision/dismiss', requireAuth, async (req, r
   }
 });
 
-// GET /api/vets/nearby?lat=&lng=&radius=
-// Returns up to 6 nearby vet clinics from Google Places. Requires GOOGLE_PLACES_API_KEY.
+// Per-category copy for the nearby-places search (used for the chat title + stored turn).
+const PLACE_COPY = {
+  vet:  { userMsg: 'Find a vet nearby',          title: 'Nearby vets',  heading: 'Here are veterinary clinics near you:', empty: 'I couldn’t find any vets within range. Try asking your local pet store or a neighbour for a recommendation.' },
+  park: { userMsg: 'Find parks nearby',          title: 'Nearby parks', heading: 'Here are parks near you for a walk:',     empty: 'I couldn’t find any parks within range. Try a wider area on Google Maps.' },
+  cafe: { userMsg: 'Find pet-friendly cafés',    title: 'Pet-friendly spots', heading: 'Here are cafés & restaurants near you (call ahead to confirm they’re pet-friendly):', empty: 'I couldn’t find any cafés or restaurants within range. Try a wider area on Google Maps.' },
+};
+
+// GET /api/vets/nearby?lat=&lng=&radius=&category=vet|park|cafe
+// Returns up to 6 nearby places of the chosen category from Google Places.
 router.get('/api/vets/nearby', requireAuth, async (req, res) => {
   const lat = parseFloat(req.query.lat);
   const lng = parseFloat(req.query.lng);
   if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
     return res.status(400).json({ error: 'Invalid coordinates.' });
   }
+  const category = isValidPlaceCategory(req.query.category) ? req.query.category : 'vet';
+  const copy = PLACE_COPY[category];
   const radius = Math.min(Math.max(parseInt(req.query.radius) || 5000, 500), 20000);
   try {
-    const vets = await findNearbyVets(lat, lng, radius);
+    const places = await findNearbyPlaces(lat, lng, category, radius);
 
     // Persist as a chat turn so the search shows up in the sidebar and survives a
     // reload — same session handshake as a normal message. The live UI renders rich
@@ -711,31 +721,31 @@ router.get('/api/vets/nearby', requireAuth, async (req, res) => {
     let sessionTitle;
     const pet = await petForOwner(req.session.ownerId);
     if (pet) {
-      const session = await resolveSession(pet.id, req.query.session_id, 'Find a vet nearby');
+      const session = await resolveSession(pet.id, req.query.session_id, copy.userMsg);
       sessionId = session.id;
       if (session.created) {
-        sessionTitle = 'Nearby vets';
+        sessionTitle = copy.title;
         await query('UPDATE conversation_session SET title = $2 WHERE id = $1', [sessionId, sessionTitle]);
       }
-      const answer = vets.length
-        ? 'Here are veterinary clinics near you:\n\n' + vets.map((v, i) =>
+      const answer = places.length
+        ? copy.heading + '\n\n' + places.map((v, i) =>
             `${i + 1}. **${v.name}**` +
             (v.rating ? ` — ⭐ ${v.rating}${v.reviews ? ` (${v.reviews})` : ''}` : '') +
             (v.open === true ? ' · Open now' : v.open === false ? ' · Closed' : '') +
             (v.address ? `\n${v.address}` : '') +
             `\n[Directions](${v.mapsUrl})`,
           ).join('\n\n')
-        : 'I couldn’t find any vets within range. Try asking your local pet store or a neighbour for a recommendation.';
-      await persistTurn({ petId: pet.id, sessionId, message: 'Find a vet nearby', answer });
+        : copy.empty;
+      await persistTurn({ petId: pet.id, sessionId, message: copy.userMsg, answer });
     }
 
-    res.json({ ok: true, vets, session_id: sessionId || undefined, session_title: sessionTitle });
+    res.json({ ok: true, category, vets: places, session_id: sessionId || undefined, session_title: sessionTitle });
   } catch (err) {
-    console.error('Vet finder error:', err.message);
+    console.error('Place finder error:', err.message);
     const configErr = err.message.includes('GOOGLE_PLACES_API_KEY');
     res.status(configErr ? 503 : 500).json({ error: configErr
-      ? 'Vet finder is not configured yet — ask the Whoof team.'
-      : 'Could not fetch nearby vets. Please try again.' });
+      ? 'Nearby search is not configured yet — ask the Whoof team.'
+      : 'Could not fetch nearby places. Please try again.' });
   }
 });
 
@@ -792,6 +802,201 @@ router.post('/api/vets/booking-draft', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('Booking draft error:', err);
     res.status(500).json({ error: 'Could not draft a booking message. Please try again.' });
+  }
+});
+
+// wa.me wants digits with country code and no separators.
+function whatsappLink(phone, text) {
+  const digits = (phone || '').replace(/[^\d]/g, '');
+  return digits.length >= 8 ? `https://wa.me/${digits}?text=${encodeURIComponent(text)}` : null;
+}
+
+// Normalise a client-supplied vets array: cap the count, sanitise each entry, drop
+// fully-empty rows, and guarantee exactly one primary (the first, if none flagged).
+const { randomUUID } = require('crypto');
+function normalizeVets(input) {
+  const arr = Array.isArray(input) ? input : [];
+  const cleaned = arr
+    .map(v => ({
+      id:      (v && typeof v.id === 'string' && v.id) ? v.id.slice(0, 64) : randomUUID(),
+      name:    (v && v.name   ? String(v.name)   : '').trim().slice(0, 120),
+      clinic:  (v && v.clinic ? String(v.clinic) : '').trim().slice(0, 160),
+      phone:   (v && v.phone  ? String(v.phone)  : '').trim().slice(0, 40),
+      primary: !!(v && v.primary),
+    }))
+    .filter(v => v.name || v.clinic || v.phone)
+    .slice(0, 10);
+  if (cleaned.length) {
+    const firstPrimary = cleaned.findIndex(v => v.primary);
+    cleaned.forEach((v, i) => { v.primary = i === (firstPrimary === -1 ? 0 : firstPrimary); });
+  }
+  return cleaned;
+}
+const primaryVet = (vets) => (Array.isArray(vets) ? (vets.find(v => v.primary) || vets[0] || null) : null);
+
+// PUT /api/vet/list — save the full set of the owner's saved vets (one flagged primary).
+router.put('/api/vet/list', requireAuth, async (req, res) => {
+  try {
+    const pet = await petForOwner(req.session.ownerId);
+    if (!pet) return res.status(400).json({ error: 'No pet profile found.' });
+    const vets = normalizeVets(req.body.vets);
+    await query(
+      'UPDATE pet_profile SET vets = $2::jsonb, updated_at = now() WHERE id = $1',
+      [pet.id, JSON.stringify(vets)],
+    );
+    res.json({ ok: true, vets });
+  } catch (err) {
+    console.error('Vet list save error:', err);
+    res.status(500).json({ error: 'Could not save vet details.' });
+  }
+});
+
+// POST /api/vet/mark-visit — record that a vet visit happened (defaults to today).
+// Sets the boundary for "summary since last visit" so the next visit starts fresh.
+router.post('/api/vet/mark-visit', requireAuth, async (req, res) => {
+  try {
+    const pet = await petForOwner(req.session.ownerId);
+    if (!pet) return res.status(400).json({ error: 'No pet profile found.' });
+    // Optional explicit date (YYYY-MM-DD); otherwise today. Reject anything malformed.
+    let visitDate = null;
+    if (req.body.date) {
+      const d = String(req.body.date).trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || isNaN(Date.parse(d))) {
+        return res.status(400).json({ error: 'Invalid date.' });
+      }
+      visitDate = d;
+    }
+    // A confirmed visit on/after the scheduled date fulfils it — clear next_vet_visit_date
+    // so a stale "upcoming appointment" doesn't linger once it's actually happened.
+    const r = await query(
+      `UPDATE pet_profile
+         SET last_vet_visit_date = COALESCE($2::date, CURRENT_DATE),
+             next_vet_visit_date = CASE
+               WHEN next_vet_visit_date IS NOT NULL
+                AND next_vet_visit_date <= COALESCE($2::date, CURRENT_DATE)
+               THEN NULL ELSE next_vet_visit_date END,
+             updated_at = now()
+       WHERE id = $1
+       RETURNING to_char(last_vet_visit_date, 'YYYY-MM-DD') AS last_vet_visit_date,
+                 to_char(next_vet_visit_date, 'YYYY-MM-DD') AS next_vet_visit_date`,
+      [pet.id, visitDate],
+    );
+    res.json({
+      ok: true,
+      last_vet_visit_date: r.rows[0].last_vet_visit_date,
+      next_vet_visit_date: r.rows[0].next_vet_visit_date,
+    });
+  } catch (err) {
+    console.error('Mark visit error:', err);
+    res.status(500).json({ error: 'Could not record the visit.' });
+  }
+});
+
+// POST /api/vet/schedule-visit — set (or clear) a future appointment date.
+// Body: { date: 'YYYY-MM-DD' | null }
+router.post('/api/vet/schedule-visit', requireAuth, async (req, res) => {
+  try {
+    const pet = await petForOwner(req.session.ownerId);
+    if (!pet) return res.status(400).json({ error: 'No pet profile found.' });
+
+    let nextDate = null;
+    if (req.body.date) {
+      const d = String(req.body.date).trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || isNaN(Date.parse(d))) {
+        return res.status(400).json({ error: 'Invalid date.' });
+      }
+      if (d < new Date().toISOString().slice(0, 10)) {
+        return res.status(400).json({ error: 'The next visit date must be today or later.' });
+      }
+      nextDate = d;
+    }
+    const r = await query(
+      `UPDATE pet_profile SET next_vet_visit_date = $2::date, updated_at = now()
+       WHERE id = $1
+       RETURNING to_char(next_vet_visit_date, 'YYYY-MM-DD') AS next_vet_visit_date`,
+      [pet.id, nextDate],
+    );
+    res.json({ ok: true, next_vet_visit_date: r.rows[0].next_vet_visit_date });
+  } catch (err) {
+    console.error('Schedule visit error:', err);
+    res.status(500).json({ error: 'Could not save the appointment date.' });
+  }
+});
+
+// POST /api/vet/summary — build the two pre-visit summaries.
+// Body: { range: 'since_visit' | 'history' }
+//   since_visit → turns strictly AFTER last_vet_visit_date (falls back to history if
+//                 no visit has ever been logged).
+//   history     → last 6 months, capped at 100 turns.
+router.post('/api/vet/summary', requireAuth, async (req, res) => {
+  try {
+    const petResult = await query(
+      `SELECT p.*, o.owner_name FROM pet_profile p
+       JOIN owners o ON o.id = p.owner_id
+       WHERE p.owner_id = $1 LIMIT 1`,
+      [req.session.ownerId],
+    );
+    if (!petResult.rows.length) return res.status(400).json({ error: 'No pet profile found.' });
+    const pet = petResult.rows[0];
+
+    const wantsSinceVisit = req.body.range === 'since_visit';
+    const hasVisit = wantsSinceVisit && !!pet.last_vet_visit_date;
+    const rangeUsed = hasVisit ? 'since_visit' : 'history';
+
+    // Pull the relevant turns (oldest first). since_visit: strictly after the visit day.
+    // history: last 6 months, newest 100 then re-ordered oldest-first.
+    let turns;
+    if (hasVisit) {
+      const r = await query(
+        `SELECT owner_question, answer_summary, escalated, created_at
+           FROM conversation_memory
+          WHERE pet_id = $1 AND created_at::date > $2::date
+          ORDER BY created_at ASC LIMIT 100`,
+        [pet.id, pet.last_vet_visit_date],
+      );
+      turns = r.rows;
+    } else {
+      const r = await query(
+        `SELECT owner_question, answer_summary, escalated, created_at FROM (
+           SELECT owner_question, answer_summary, escalated, created_at
+             FROM conversation_memory
+            WHERE pet_id = $1 AND created_at > now() - interval '6 months'
+            ORDER BY created_at DESC LIMIT 100
+         ) t ORDER BY created_at ASC`,
+        [pet.id],
+      );
+      turns = r.rows;
+    }
+
+    const [decisions, rollingSummary] = await Promise.all([
+      loadActiveDecisions(pet.id),
+      getRollingSummary(pet.id),
+    ]);
+
+    const { briefing, checklist } = await generateVetSummaries({
+      pet, ownerName: pet.owner_name || '', turns, decisions, rollingSummary,
+    });
+
+    // Send the briefing to the primary saved vet's WhatsApp, prefixed as a note.
+    const vet = primaryVet(pet.vets);
+    const waText = `Pre-visit summary for ${pet.name}${vet && vet.name ? ` (Dr ${vet.name})` : ''}:\n\n${briefing}`;
+    const whatsappUrl = whatsappLink(vet && vet.phone, waText);
+
+    res.json({
+      ok: true,
+      range_used: rangeUsed,
+      requested_since_visit: wantsSinceVisit,
+      turn_count: turns.length,
+      last_vet_visit_date: pet.last_vet_visit_date
+        ? new Date(pet.last_vet_visit_date).toISOString().slice(0, 10) : null,
+      briefing,
+      checklist,
+      vet_name: vet && vet.name ? vet.name : null,
+      whatsapp_url: whatsappUrl || undefined,
+    });
+  } catch (err) {
+    console.error('Vet summary error:', err);
+    res.status(500).json({ error: 'Could not generate the summary. Please try again.' });
   }
 });
 

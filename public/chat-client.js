@@ -920,8 +920,34 @@
   // Attach rating widgets to the server-rendered history turns on page load.
   initHistoryFeedback();
 
-  // ── Vet finder ────────────────────────────────────────────────────────────
-  function buildVetCard(vet) {
+  // ── Nearby places (vets / parks / pet-friendly cafés) ───────────────────────
+  // Each category drives the picker card, the location-prompt copy, and the results.
+  const PLACE_META = {
+    vet: {
+      label: 'Vets', tagline: 'Clinics near you',
+      icon: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"></path>',
+      userMsg: 'Find a vet nearby', prompt: 'find vets near you',
+      header: 'Here are vets near you:', empty: 'No vets found within range. Try asking your local pet store or a neighbour.',
+      booking: true,
+    },
+    park: {
+      label: 'Parks', tagline: 'Walks & dog parks',
+      icon: '<path d="M12 22V12"></path><path d="M7 12a5 5 0 0 1 5-5 5 5 0 0 1 5 5"></path><path d="M5 22h14"></path><path d="M12 7V2"></path>',
+      userMsg: 'Find parks nearby', prompt: 'find parks near you',
+      header: 'Here are parks near you for a walk:', empty: 'No parks found within range. Try a wider area on Google Maps.',
+      booking: false,
+    },
+    cafe: {
+      label: 'Cafés', tagline: 'Pet-friendly spots',
+      icon: '<path d="M18 8h1a4 4 0 0 1 0 8h-1"></path><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4z"></path><line x1="6" y1="2" x2="6" y2="4"></line><line x1="10" y1="2" x2="10" y2="4"></line><line x1="14" y1="2" x2="14" y2="4"></line>',
+      userMsg: 'Find pet-friendly cafés', prompt: 'find cafés & restaurants near you',
+      header: 'Here are cafés & restaurants near you — call ahead to confirm they’re pet-friendly:',
+      empty: 'No cafés or restaurants found within range. Try a wider area on Google Maps.',
+      booking: false,
+    },
+  };
+
+  function buildVetCard(vet, allowBooking) {
     const stars = vet.rating
       ? '★'.repeat(Math.round(vet.rating)) + '☆'.repeat(5 - Math.round(vet.rating))
       : null;
@@ -930,6 +956,10 @@
       : vet.open === false
         ? '<span class="vet-closed">Closed</span>'
         : '';
+    const bookBtn = allowBooking
+      ? '<button type="button" class="vet-book-btn" data-clinic="' + escHtml(vet.name) +
+          '" data-phone="' + escHtml(vet.phone || '') + '">Draft booking</button>'
+      : '';
 
     return '<div class="vet-card">' +
       '<div class="vet-card-name">' + escHtml(vet.name) + openBadge + '</div>' +
@@ -939,29 +969,66 @@
         (vet.reviews ? ' (' + vet.reviews + ')' : '') + '</span></div>' : '') +
       '<div class="vet-card-actions">' +
         '<a class="vet-card-link" href="' + escHtml(vet.mapsUrl) + '" target="_blank" rel="noopener">Directions ↗</a>' +
-        '<button type="button" class="vet-book-btn" data-clinic="' + escHtml(vet.name) +
-          '" data-phone="' + escHtml(vet.phone || '') + '">Draft booking</button>' +
+        bookBtn +
       '</div>' +
     '</div>';
   }
 
-  function showVetResults(vets) {
+  // Side-by-side category cards shown when the owner taps the location button.
+  function showPlacePicker() {
+    const hero = messagesArea.querySelector('.empty-hero');
+    if (hero) hero.remove();
+
+    const cards = Object.keys(PLACE_META).map(function (key) {
+      const m = PLACE_META[key];
+      return '<button type="button" class="place-pick-card" data-category="' + key + '">' +
+        '<span class="place-pick-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + m.icon + '</svg></span>' +
+        '<span class="place-pick-label">' + m.label + '</span>' +
+        '<span class="place-pick-tagline">' + m.tagline + '</span>' +
+      '</button>';
+    }).join('');
+
     const el = document.createElement('div');
     el.className = 'message ai-message';
     el.innerHTML =
       '<div class="ai-avatar">W</div>' +
       '<div class="bubble-wrap">' +
-        '<div class="vet-results-header">Here are vets near you:</div>' +
+        '<div class="bubble">What would you like to find near you?</div>' +
+        '<div class="place-pick-grid">' + cards + '</div>' +
+        '<div class="meta">' + fmtTime(new Date()) + '</div>' +
+      '</div>';
+    messagesArea.appendChild(el);
+    el.querySelectorAll('.place-pick-card').forEach(function (card) {
+      card.addEventListener('click', function () {
+        // Lock the choice visually, then ask for location for that category.
+        el.querySelectorAll('.place-pick-card').forEach(function (c) {
+          c.disabled = true;
+          c.classList.toggle('selected', c === card);
+        });
+        showLocationPrompt(card.getAttribute('data-category'));
+      });
+    });
+    scrollToBottom();
+  }
+
+  function showVetResults(vets, category) {
+    const m = PLACE_META[category] || PLACE_META.vet;
+    const el = document.createElement('div');
+    el.className = 'message ai-message';
+    el.innerHTML =
+      '<div class="ai-avatar">W</div>' +
+      '<div class="bubble-wrap">' +
+        '<div class="vet-results-header">' + escHtml(m.header) + '</div>' +
         '<div class="vet-results">' +
           (vets.length
-            ? vets.map(buildVetCard).join('')
-            : '<div class="vet-empty">No vets found within 5 km. Try asking your local pet store or neighbour for a recommendation.</div>'
+            ? vets.map(function (v) { return buildVetCard(v, m.booking); }).join('')
+            : '<div class="vet-empty">' + escHtml(m.empty) + '</div>'
           ) +
         '</div>' +
         '<div class="meta">' + fmtTime(new Date()) + '</div>' +
       '</div>';
     messagesArea.appendChild(el);
-    // Wire each card's "Draft booking" button (closure access to the draft helpers).
+    // Wire each card's "Draft booking" button (vets only; closure access to the helpers).
     el.querySelectorAll('.vet-book-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
         requestBookingDraft(btn.getAttribute('data-clinic'), btn.getAttribute('data-phone'), btn);
@@ -1055,12 +1122,13 @@
     }
   }
 
-  function showLocationPrompt() {
+  function showLocationPrompt(category) {
+    const m = PLACE_META[category] || PLACE_META.vet;
     // First action of a brand-new chat clears the hero so the conversation takes over.
     const hero = messagesArea.querySelector('.empty-hero');
     if (hero) hero.remove();
 
-    appendUserMessage('Find a vet nearby');
+    appendUserMessage(m.userMsg);
     scrollToBottom();
 
     const el = document.createElement('div');
@@ -1068,7 +1136,7 @@
     const inner =
       '<div class="ai-avatar">W</div>' +
       '<div class="bubble-wrap">' +
-        '<div class="bubble">Sure! I need your location to find vets near you.</div>' +
+        '<div class="bubble">Sure! I need your location to ' + escHtml(m.prompt) + '.</div>' +
         '<div class="vet-location-card" id="vet-location-card">' +
           '<button type="button" class="btn btn-primary" id="vet-share-location-btn">' +
             '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>' +
@@ -1085,7 +1153,7 @@
     const shareBtn = el.querySelector('#vet-share-location-btn');
     shareBtn.addEventListener('click', function () {
       if (!navigator.geolocation) {
-        showVetError('Your browser does not support location sharing. Please search Google Maps for "vets near me".');
+        showVetError('Your browser does not support location sharing. Please search Google Maps instead.');
         return;
       }
       shareBtn.disabled = true;
@@ -1094,12 +1162,13 @@
         function (pos) {
           shareBtn.closest('.vet-location-card').innerHTML = '<span style="color:var(--text-muted);font-size:.85rem">Location shared ✓</span>';
           const qs = 'lat=' + pos.coords.latitude + '&lng=' + pos.coords.longitude +
+            '&category=' + encodeURIComponent(category || 'vet') +
             (sessionId ? '&session_id=' + encodeURIComponent(sessionId) : '');
           fetch('/api/vets/nearby?' + qs)
             .then(function (r) { return r.json(); })
             .then(function (data) {
-              if (data.ok) { adoptVetSession(data); showVetResults(data.vets); }
-              else { showVetError(data.error || 'Could not fetch nearby vets.'); }
+              if (data.ok) { adoptVetSession(data); showVetResults(data.vets, data.category || category); }
+              else { showVetError(data.error || 'Could not fetch nearby places.'); }
             })
             .catch(function () { showVetError('Network error — please try again.'); });
         },
@@ -1117,9 +1186,349 @@
     });
   }
 
-  // Wire up both buttons (hero quick-pill + toolbar button)
+  // Wire the location button(s) → category picker (hero quick-pill + input icon button).
   ['vet-finder-btn', 'vet-finder-btn-toolbar'].forEach(function (id) {
     const btn = document.getElementById(id);
-    if (btn) btn.addEventListener('click', showLocationPrompt);
+    if (btn) btn.addEventListener('click', showPlacePicker);
   });
+
+  // ── Sidebar drag-to-resize ───────────────────────────────────────────────
+  (function initSidebarResize() {
+    const sidebar = document.querySelector('.chat-sidebar');
+    const handle = document.getElementById('sidebar-resizer');
+    if (!sidebar || !handle) return;
+    const MIN = 200, MAX = 460;
+    const stored = parseInt(localStorage.getItem('whoof-sidebar-w'), 10);
+    if (stored >= MIN && stored <= MAX) sidebar.style.width = stored + 'px';
+
+    let dragging = false;
+    function onMove(e) {
+      if (!dragging) return;
+      const x = (e.touches ? e.touches[0].clientX : e.clientX);
+      const w = Math.min(MAX, Math.max(MIN, x - sidebar.getBoundingClientRect().left));
+      sidebar.style.width = w + 'px';
+    }
+    function stop() {
+      if (!dragging) return;
+      dragging = false;
+      document.body.classList.remove('resizing-sidebar');
+      localStorage.setItem('whoof-sidebar-w', parseInt(sidebar.style.width, 10));
+    }
+    function start(e) { dragging = true; document.body.classList.add('resizing-sidebar'); e.preventDefault(); }
+    handle.addEventListener('mousedown', start);
+    handle.addEventListener('touchstart', start, { passive: false });
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('touchmove', onMove, { passive: false });
+    window.addEventListener('mouseup', stop);
+    window.addEventListener('touchend', stop);
+    // Double-click the handle to reset to default width.
+    handle.addEventListener('dblclick', function () {
+      sidebar.style.width = ''; localStorage.removeItem('whoof-sidebar-w');
+    });
+  })();
+
+  // ── My Vet panel (collapsible; one or more saved vets; pre-visit summaries) ──
+  (function initVetPanel() {
+    const panel = document.getElementById('vet-panel');
+    if (!panel) return;
+
+    const toggle   = document.getElementById('vet-panel-toggle');
+    const body     = document.getElementById('vet-panel-body');
+    const listEl   = document.getElementById('vet-list');
+    const countEl  = document.getElementById('vet-count');
+    const addBtn   = document.getElementById('vet-add-btn');
+    const form     = document.getElementById('vet-form');
+    const cancelBtn= document.getElementById('vet-cancel-btn');
+    const saveBtn  = document.getElementById('vet-save-btn');
+    const nameIn   = document.getElementById('vet-name-input');
+    const clinicIn = document.getElementById('vet-clinic-input');
+    const phoneIn  = document.getElementById('vet-phone-input');
+    const markBtn  = document.getElementById('vet-mark-visit-btn');
+    const visitOut = document.getElementById('vet-visit-date');
+    const visitPicker  = document.getElementById('vet-visit-picker');
+    const visitInput   = document.getElementById('vet-visit-input');
+    const visitConfirm = document.getElementById('vet-visit-confirm');
+    const visitCancel  = document.getElementById('vet-visit-cancel');
+    const scheduleBtn     = document.getElementById('vet-schedule-btn');
+    const clearNextBtn    = document.getElementById('vet-clear-next-btn');
+    const nextVisitOut     = document.getElementById('vet-next-visit-date');
+    const schedulePicker   = document.getElementById('vet-schedule-picker');
+    const scheduleInput    = document.getElementById('vet-schedule-input');
+    const scheduleConfirm  = document.getElementById('vet-schedule-confirm');
+    const scheduleCancel   = document.getElementById('vet-schedule-cancel');
+    const prepBtn  = document.getElementById('vet-prep-btn');
+    const rangeBox = document.getElementById('vet-range');
+
+    function todayLocal() {
+      const d = new Date();
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+
+    let vets = Array.isArray(window.__VETS__) ? window.__VETS__.slice() : [];
+    let editingId = null; // null = adding, otherwise editing this vet's id
+
+    // Collapsed by default; remember the owner's preference.
+    function setOpen(open) {
+      body.hidden = !open;
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      panel.classList.toggle('open', open);
+      localStorage.setItem('whoof-vet-open', open ? '1' : '0');
+    }
+    setOpen(localStorage.getItem('whoof-vet-open') === '1');
+    toggle.addEventListener('click', function () { setOpen(body.hidden); });
+
+    function renderList() {
+      countEl.textContent = vets.length;
+      countEl.hidden = vets.length === 0;
+      listEl.innerHTML = vets.map(function (v) {
+        const tag = v.primary ? '<span class="vet-primary-tag">Primary</span>' : '';
+        const phone = v.phone ? '<a class="vet-item-phone" href="tel:' + escHtml(v.phone) + '">' + escHtml(v.phone) + '</a>' : '';
+        const makePrimary = v.primary ? '' : '<button type="button" class="vet-item-link" data-act="primary" data-id="' + escHtml(v.id) + '">Make primary</button>';
+        return '<div class="vet-item' + (v.primary ? ' is-primary' : '') + '">' +
+          '<div class="vet-item-main">' +
+            '<div class="vet-item-name">' + (escHtml(v.name) || '<span class="vet-item-muted">Unnamed vet</span>') + tag + '</div>' +
+            (v.clinic ? '<div class="vet-item-clinic">' + escHtml(v.clinic) + '</div>' : '') +
+            phone +
+          '</div>' +
+          '<div class="vet-item-actions">' +
+            makePrimary +
+            '<button type="button" class="vet-item-link" data-act="edit" data-id="' + escHtml(v.id) + '">Edit</button>' +
+            '<button type="button" class="vet-item-link danger" data-act="del" data-id="' + escHtml(v.id) + '">Remove</button>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+    }
+    renderList();
+
+    function persist() {
+      return fetch('/api/vet/list', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vets: vets }),
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (!data.ok) throw new Error(data.error || 'save failed');
+          vets = data.vets || [];
+          window.__VETS__ = vets;
+          renderList();
+        })
+        .catch(function () { alert('Could not save vet details. Please try again.'); });
+    }
+
+    function openForm(vet) {
+      editingId = vet ? vet.id : null;
+      nameIn.value   = vet ? (vet.name   || '') : '';
+      clinicIn.value = vet ? (vet.clinic || '') : '';
+      phoneIn.value  = vet ? (vet.phone  || '') : '';
+      saveBtn.textContent = vet ? 'Save' : 'Add';
+      addBtn.hidden = true; form.hidden = false; nameIn.focus();
+    }
+    function closeForm() { form.hidden = true; addBtn.hidden = false; editingId = null; }
+
+    addBtn.addEventListener('click', function () { openForm(null); });
+    cancelBtn.addEventListener('click', closeForm);
+
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      const entry = { name: nameIn.value.trim(), clinic: clinicIn.value.trim(), phone: phoneIn.value.trim() };
+      if (!entry.name && !entry.clinic && !entry.phone) return;
+      if (editingId) {
+        vets = vets.map(function (v) { return v.id === editingId ? Object.assign({}, v, entry) : v; });
+      } else {
+        vets.push(Object.assign({ id: 'tmp-' + Date.now(), primary: vets.length === 0 }, entry));
+      }
+      saveBtn.disabled = true;
+      persist().finally(function () { saveBtn.disabled = false; closeForm(); });
+    });
+
+    // Delegated actions on the vet list (edit / remove / make-primary).
+    listEl.addEventListener('click', function (e) {
+      const btn = e.target.closest('[data-act]');
+      if (!btn) return;
+      const id = btn.getAttribute('data-id');
+      const act = btn.getAttribute('data-act');
+      if (act === 'edit') { openForm(vets.find(function (v) { return v.id === id; })); return; }
+      if (act === 'del') {
+        const v = vets.find(function (x) { return x.id === id; });
+        if (!confirm('Remove ' + ((v && v.name) || 'this vet') + '?')) return;
+        vets = vets.filter(function (x) { return x.id !== id; });
+        persist();
+      }
+      if (act === 'primary') {
+        vets = vets.map(function (v) { return Object.assign({}, v, { primary: v.id === id }); });
+        persist();
+      }
+    });
+
+    // "Set date" reveals a calendar (defaulting to today, capped at today since a last
+    // visit can't be in the future); Confirm records it and resets the summary boundary.
+    markBtn.addEventListener('click', function () {
+      const open = visitPicker.hidden;
+      visitPicker.hidden = !open;
+      if (open) { visitInput.max = todayLocal(); if (!visitInput.value) visitInput.value = todayLocal(); }
+    });
+    visitCancel.addEventListener('click', function () { visitPicker.hidden = true; });
+    visitConfirm.addEventListener('click', function () {
+      if (!visitInput.value) return;
+      visitConfirm.disabled = true;
+      fetch('/api/vet/mark-visit', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: visitInput.value }),
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (data.ok && data.last_vet_visit_date) {
+            const d = new Date(data.last_vet_visit_date + 'T00:00:00');
+            visitOut.textContent = d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+            visitPicker.hidden = true;
+            // A confirmed visit on/after the scheduled date fulfils it server-side.
+            applyNextVisit(data.next_vet_visit_date || null);
+          } else { alert(data.error || 'Could not record the visit.'); }
+        })
+        .catch(function () { alert('Network error — please try again.'); })
+        .finally(function () { visitConfirm.disabled = false; });
+    });
+
+    // "Schedule"/"Change" reveals a calendar for a FUTURE appointment (min = today,
+    // unlike the last-visit picker which is capped at today).
+    scheduleBtn.addEventListener('click', function () {
+      const open = schedulePicker.hidden;
+      schedulePicker.hidden = !open;
+      if (open) { scheduleInput.min = todayLocal(); if (!scheduleInput.value) scheduleInput.value = todayLocal(); }
+    });
+    scheduleCancel.addEventListener('click', function () { schedulePicker.hidden = true; });
+    scheduleConfirm.addEventListener('click', function () {
+      if (!scheduleInput.value) return;
+      scheduleConfirm.disabled = true;
+      fetch('/api/vet/schedule-visit', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: scheduleInput.value }),
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (data.ok) {
+            applyNextVisit(data.next_vet_visit_date);
+            schedulePicker.hidden = true;
+          } else { alert(data.error || 'Could not save the appointment date.'); }
+        })
+        .catch(function () { alert('Network error — please try again.'); })
+        .finally(function () { scheduleConfirm.disabled = false; });
+    });
+    clearNextBtn.addEventListener('click', function () {
+      if (!confirm('Clear the scheduled appointment?')) return;
+      clearNextBtn.disabled = true;
+      fetch('/api/vet/schedule-visit', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: null }),
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (data) { if (data.ok) applyNextVisit(data.next_vet_visit_date); })
+        .catch(function () {})
+        .finally(function () { clearNextBtn.disabled = false; });
+    });
+    function applyNextVisit(dateStr) {
+      if (dateStr) {
+        const d = new Date(dateStr + 'T00:00:00');
+        nextVisitOut.textContent = d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+        scheduleBtn.textContent = 'Change';
+        clearNextBtn.hidden = false;
+      } else {
+        nextVisitOut.textContent = 'None scheduled';
+        scheduleBtn.textContent = 'Schedule';
+        clearNextBtn.hidden = true;
+        scheduleInput.value = '';
+      }
+    }
+
+    prepBtn.addEventListener('click', function () { rangeBox.hidden = !rangeBox.hidden; });
+    rangeBox.querySelectorAll('.vet-range-opt').forEach(function (opt) {
+      opt.addEventListener('click', function () {
+        rangeBox.hidden = true;
+        requestVetSummary(opt.getAttribute('data-range'));
+      });
+    });
+  })();
+
+  // Generate the pre-visit summaries and render them in the chat area.
+  function requestVetSummary(range) {
+    const messagesArea = document.getElementById('messages-area');
+    const hero = messagesArea.querySelector('.empty-hero');
+    if (hero) hero.remove();
+
+    const loading = document.createElement('div');
+    loading.className = 'message ai-message';
+    loading.innerHTML = '<div class="ai-avatar">W</div><div class="bubble-wrap"><div class="bubble">Putting together a summary for your vet…</div></div>';
+    messagesArea.appendChild(loading);
+    scrollToBottom();
+
+    fetch('/api/vet/summary', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ range: range }),
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        loading.remove();
+        if (data.ok) showVetSummary(data);
+        else showVetError(data.error || 'Could not generate the summary.');
+      })
+      .catch(function () { loading.remove(); showVetError('Network error — please try again.'); });
+  }
+
+  function showVetSummary(data) {
+    const messagesArea = document.getElementById('messages-area');
+    const checklistHtml = (data.checklist || [])
+      .map(function (c) { return '<li>' + escHtml(c) + '</li>'; }).join('');
+
+    // If the owner asked for "since last visit" but none was logged, say so.
+    const rangeNote = (data.requested_since_visit && data.range_used === 'history')
+      ? '<div class="vet-sum-note">No past visit logged yet — showing your full recent history instead.</div>'
+      : (data.range_used === 'since_visit'
+          ? '<div class="vet-sum-note">Covering everything since your last visit' + (data.last_vet_visit_date ? ' (' + escHtml(data.last_vet_visit_date) + ')' : '') + '.</div>'
+          : '<div class="vet-sum-note">Covering your recent chat history.</div>');
+
+    const sendRow = data.whatsapp_url
+      ? '<a class="btn btn-primary booking-send" href="' + escHtml(data.whatsapp_url) + '" target="_blank" rel="noopener">Send to vet via WhatsApp ↗</a>'
+      : '<span class="booking-nophone">Add your vet’s phone number in “My Vet” to send this with one tap.</span>';
+
+    const el = document.createElement('div');
+    el.className = 'message ai-message';
+    el.innerHTML =
+      '<div class="ai-avatar">W</div>' +
+      '<div class="bubble-wrap">' +
+        '<div class="vet-sum-card">' +
+          rangeNote +
+          '<div class="vet-sum-section">' +
+            '<div class="vet-sum-label">For your vet' + (data.vet_name ? ' — Dr ' + escHtml(data.vet_name) : '') + '</div>' +
+            '<div class="vet-sum-briefing"></div>' +
+            '<div class="booking-actions">' + sendRow +
+              '<button type="button" class="btn btn-ghost vet-sum-copy">Copy briefing</button>' +
+            '</div>' +
+          '</div>' +
+          '<div class="vet-sum-section">' +
+            '<div class="vet-sum-label">Things to mention today</div>' +
+            '<ul class="vet-sum-checklist">' + checklistHtml + '</ul>' +
+          '</div>' +
+        '</div>' +
+        '<div class="meta">' + fmtTime(new Date()) + '</div>' +
+      '</div>';
+    el.querySelector('.vet-sum-briefing').textContent = data.briefing || '';
+    messagesArea.appendChild(el);
+
+    const copyBtn = el.querySelector('.vet-sum-copy');
+    copyBtn.addEventListener('click', function () {
+      const done = function () { copyBtn.textContent = 'Copied ✓'; setTimeout(function () { copyBtn.textContent = 'Copy briefing'; }, 1800); };
+      const text = data.briefing || '';
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(function () {});
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text; document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); done(); } catch (e) { /* noop */ }
+        document.body.removeChild(ta);
+      }
+    });
+    scrollToBottom();
+  }
 })();

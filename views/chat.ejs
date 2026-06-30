@@ -68,7 +68,87 @@
           <div class="session-empty">No past chats yet.</div>
         <% } %>
       </nav>
+
+      <div class="vet-panel" id="vet-panel">
+        <p class="vet-panel-desc">Save your regular vet's contact, track visit dates, and generate a quick summary to bring to your next appointment.</p>
+        <button type="button" class="vet-panel-head" id="vet-panel-toggle" aria-expanded="false">
+          <span class="vet-panel-title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
+            My Vet
+            <span class="vet-count" id="vet-count" <%= (pet.vets && pet.vets.length) ? '' : 'hidden' %>><%= pet.vets ? pet.vets.length : 0 %></span>
+          </span>
+          <svg class="vet-chevron" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </button>
+
+        <div class="vet-panel-body" id="vet-panel-body" hidden>
+          <div class="vet-list" id="vet-list"><!-- rendered client-side from window.__VETS__ --></div>
+
+          <button type="button" class="vet-add-btn" id="vet-add-btn">+ Add a vet</button>
+
+          <form class="vet-form" id="vet-form" hidden>
+            <input type="text" id="vet-name-input" placeholder="Vet name (e.g. Dr Sharma)" maxlength="120">
+            <input type="text" id="vet-clinic-input" placeholder="Clinic name" maxlength="160">
+            <input type="tel" id="vet-phone-input" placeholder="Phone (+91…)" maxlength="40">
+            <div class="vet-form-actions">
+              <button type="submit" class="btn btn-primary" id="vet-save-btn">Add</button>
+              <button type="button" class="btn btn-ghost" id="vet-cancel-btn">Cancel</button>
+            </div>
+          </form>
+
+          <div class="vet-divider"></div>
+
+          <div class="vet-visit-row">
+            <div class="vet-visit-head">
+              <span class="vet-visit-label">Last vet visit</span>
+              <button type="button" class="vet-link-btn" id="vet-mark-visit-btn">Set date</button>
+            </div>
+            <span class="vet-visit-date" id="vet-visit-date"><%= pet.last_vet_visit_date ? new Date(pet.last_vet_visit_date).toLocaleDateString('en-IN', {day:'numeric', month:'short', year:'numeric'}) : 'Not logged yet' %></span>
+            <div class="vet-visit-picker" id="vet-visit-picker" hidden>
+              <input type="date" id="vet-visit-input" class="vet-date-input">
+              <div class="vet-form-actions">
+                <button type="button" class="btn btn-primary" id="vet-visit-confirm">Confirm visit</button>
+                <button type="button" class="btn btn-ghost" id="vet-visit-cancel">Cancel</button>
+              </div>
+              <p class="vet-visit-hint">Setting this starts a fresh “since last visit” summary from this date.</p>
+            </div>
+          </div>
+
+          <div class="vet-visit-row">
+            <div class="vet-visit-head">
+              <span class="vet-visit-label">Next appointment</span>
+              <button type="button" class="vet-link-btn" id="vet-schedule-btn"><%= pet.next_vet_visit_date ? 'Change' : 'Schedule' %></button>
+            </div>
+            <div class="vet-visit-head">
+              <span class="vet-visit-date" id="vet-next-visit-date"><%= pet.next_vet_visit_date ? new Date(pet.next_vet_visit_date).toLocaleDateString('en-IN', {day:'numeric', month:'short', year:'numeric'}) : 'None scheduled' %></span>
+              <button type="button" class="vet-link-btn" id="vet-clear-next-btn" <%= pet.next_vet_visit_date ? '' : 'hidden' %>>Clear</button>
+            </div>
+            <div class="vet-visit-picker" id="vet-schedule-picker" hidden>
+              <input type="date" id="vet-schedule-input" class="vet-date-input">
+              <div class="vet-form-actions">
+                <button type="button" class="btn btn-primary" id="vet-schedule-confirm">Save date</button>
+                <button type="button" class="btn btn-ghost" id="vet-schedule-cancel">Cancel</button>
+              </div>
+              <p class="vet-visit-hint">Keep track of your dog's upcoming appointment.</p>
+            </div>
+          </div>
+
+          <div class="vet-divider"></div>
+
+          <div class="vet-prep-block">
+            <button type="button" class="vet-prep-btn" id="vet-prep-btn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+              Prep for vet visit
+            </button>
+            <p class="vet-prep-caption">Whoof reads your recent chats and writes a short summary for your vet, plus a checklist of things to mention.</p>
+            <div class="vet-range" id="vet-range" hidden>
+              <button type="button" class="vet-range-opt" data-range="since_visit">Since last visit</button>
+              <button type="button" class="vet-range-opt" data-range="history">Full history</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </aside>
+    <div class="sidebar-resizer" id="sidebar-resizer" title="Drag to resize" role="separator" aria-orientation="vertical"></div>
 
     <div class="chat-layout">
     <div class="messages-area" id="messages-area">
@@ -184,13 +264,10 @@
     </div><!-- /messages-area -->
 
     <div class="input-area">
-      <div class="input-toolbar">
-        <button type="button" class="toolbar-btn vet-finder-pill" id="vet-finder-btn-toolbar" title="Find a vet near me">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
-          Find a vet nearby
-        </button>
-      </div>
       <div class="input-wrap">
+        <button type="button" class="input-icon-btn vet-finder-pill" id="vet-finder-btn-toolbar" title="Find a vet nearby" aria-label="Find a vet nearby">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+        </button>
         <span class="input-spark" aria-hidden="true">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 3l1.7 4.8L18.5 9.5l-4.8 1.7L12 16l-1.7-4.8L5.5 9.5l4.8-1.7z"></path>
@@ -219,6 +296,7 @@
   <script>
     window.__SESSION_ID__ = '<%= activeSessionId || "" %>';
     window.__PET_NAME__ = '<%- pet.name.replace(/\\/g, "\\\\").replace(/'/g, "\\'") %>';
+    window.__VETS__ = <%- JSON.stringify(pet.vets || []) %>;
   </script>
   <script src="/chat-client.js"></script>
   <script>
