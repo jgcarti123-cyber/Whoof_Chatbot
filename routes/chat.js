@@ -13,6 +13,7 @@ const {
 const { findNearbyVets, findNearbyPlaces, searchPlaceByText, isValidCategory: isValidPlaceCategory } = require('../lib/vetFinder');
 const { draftBookingMessage } = require('../lib/booking');
 const { looksLikeBooking, detectBookingRequest } = require('../lib/bookingIntent');
+const { attachCommunity } = require('../lib/communityPicks');
 const { generateVetSummaries } = require('../lib/vetSummary');
 const webSearch = require('../lib/webSearch');
 const { maybeUpdate: maybeUpdateExcel } = require('../lib/exportExcel');
@@ -757,6 +758,13 @@ router.get('/api/vets/nearby', requireAuth, async (req, res) => {
   try {
     const places = await findNearbyPlaces(lat, lng, category, radius);
 
+    // Layer community sentiment (Reddit/forum/web "what pet owners recommend") on top of
+    // the real Google places: re-rank favourites to the top, annotate why, and collect a
+    // few extra spots locals love. Fail-soft — returns the plain places on any error.
+    const community = await attachCommunity({ places, category });
+    const enrichedPlaces = community.places;
+    const extras = community.extras || [];
+
     // Persist as a chat turn so the search shows up in the sidebar and survives a
     // reload — same session handshake as a normal message. The live UI renders rich
     // cards; the stored markdown is what re-renders on reload.
@@ -770,19 +778,22 @@ router.get('/api/vets/nearby', requireAuth, async (req, res) => {
         sessionTitle = copy.title;
         await query('UPDATE conversation_session SET title = $2 WHERE id = $1', [sessionId, sessionTitle]);
       }
-      const answer = places.length
-        ? copy.heading + '\n\n' + places.map((v, i) =>
+      const answer = enrichedPlaces.length
+        ? copy.heading + '\n\n' + enrichedPlaces.map((v, i) =>
             `${i + 1}. **${v.name}**` +
+            (v.community && v.community.favourite ? ' · 🐾 Community pick' : '') +
             (v.rating ? ` — ⭐ ${v.rating}${v.reviews ? ` (${v.reviews})` : ''}` : '') +
             (v.open === true ? ' · Open now' : v.open === false ? ' · Closed' : '') +
             (v.address ? `\n${v.address}` : '') +
+            (v.community && v.community.reason ? `\n_Why pet owners like it: ${v.community.reason}_` : '') +
             `\n[Directions](${v.mapsUrl})`,
-          ).join('\n\n')
+          ).join('\n\n') +
+          (extras.length ? `\n\n🐾 Also loved by local pet owners: ${extras.map(e => e.name).join(', ')}` : '')
         : copy.empty;
       await persistTurn({ petId: pet.id, sessionId, message: copy.userMsg, answer });
     }
 
-    res.json({ ok: true, category, vets: places, session_id: sessionId || undefined, session_title: sessionTitle });
+    res.json({ ok: true, category, vets: enrichedPlaces, community_extras: extras, session_id: sessionId || undefined, session_title: sessionTitle });
   } catch (err) {
     console.error('Place finder error:', err.message);
     const configErr = err.message.includes('GOOGLE_PLACES_API_KEY');

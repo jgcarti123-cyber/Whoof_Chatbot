@@ -1513,6 +1513,39 @@ a:hover { text-decoration: underline; }
   font-size: .85rem; color: var(--text-muted); padding: .5rem 0;
 }
 
+/* Community picks — sentiment layered on the Google results (lib/communityPicks.js) */
+.vet-pick-note {
+  font-size: .76rem; color: var(--text-muted); margin: -.2rem 0 .55rem; padding: 0 .1rem;
+}
+.vet-community-badge {
+  font-size: .67rem; font-weight: 700; padding: .12rem .42rem; border-radius: 999px;
+  background: var(--primary-light); color: var(--primary); white-space: nowrap;
+}
+.vet-card--pick {
+  border-color: hsl(var(--c-brand) / .5);
+  box-shadow: 0 0 0 1px hsl(var(--c-brand) / .25) inset;
+}
+.vet-card-why {
+  font-size: .79rem; line-height: 1.4; color: var(--text);
+  background: var(--primary-light); border-radius: 8px;
+  padding: .35rem .55rem; margin-bottom: .45rem;
+}
+.vet-extras {
+  margin-top: .7rem; padding-top: .6rem; border-top: 1px dashed var(--border);
+  display: flex; flex-direction: column; gap: .35rem; max-width: 400px;
+}
+.vet-extras-label {
+  font-size: .76rem; font-weight: 600; color: var(--text-muted); margin-bottom: .1rem;
+}
+.vet-extra {
+  display: flex; flex-direction: column; gap: .05rem;
+  text-decoration: none; padding: .35rem .55rem; border-radius: 8px;
+  background: var(--surface); border: 1px solid var(--border);
+}
+.vet-extra:hover { border-color: var(--primary); }
+.vet-extra-name { font-size: .82rem; font-weight: 600; color: var(--primary); }
+.vet-extra-why { font-size: .76rem; color: var(--text-muted); }
+
 /* Booking-draft card (WhatsApp one-tap message) */
 .booking-card {
   background: var(--surface); border: 1px solid var(--border);

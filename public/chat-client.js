@@ -975,13 +975,21 @@
       ? '<button type="button" class="vet-book-btn" data-clinic="' + escHtml(vet.name) +
           '" data-phone="' + escHtml(vet.phone || '') + '">Draft booking</button>'
       : '';
+    const community = vet.community || {};
+    const communityBadge = community.favourite
+      ? '<span class="vet-community-badge">🐾 Community pick</span>'
+      : '';
+    const whyLine = community.favourite && community.reason
+      ? '<div class="vet-card-why">' + escHtml(community.reason) + '</div>'
+      : '';
 
-    return '<div class="vet-card">' +
-      '<div class="vet-card-name">' + escHtml(vet.name) + openBadge + '</div>' +
+    return '<div class="vet-card' + (community.favourite ? ' vet-card--pick' : '') + '">' +
+      '<div class="vet-card-name">' + escHtml(vet.name) + openBadge + communityBadge + '</div>' +
       (vet.address ? '<div class="vet-card-addr">' + escHtml(vet.address) + '</div>' : '') +
       (stars ? '<div class="vet-card-rating"><span class="vet-stars">' + stars + '</span>' +
         '<span class="vet-rating-num">' + escHtml(String(vet.rating)) +
         (vet.reviews ? ' (' + vet.reviews + ')' : '') + '</span></div>' : '') +
+      whyLine +
       '<div class="vet-card-actions">' +
         '<a class="vet-card-link" href="' + escHtml(vet.mapsUrl) + '" target="_blank" rel="noopener">Directions ↗</a>' +
         bookBtn +
@@ -1026,20 +1034,44 @@
     scrollToBottom();
   }
 
-  function showVetResults(vets, category) {
+  function showVetResults(data, category) {
     const m = PLACE_META[category] || PLACE_META.vet;
+    const vets = (data && data.vets) || [];
+    const extras = (data && data.community_extras) || [];
+    const anyPick = vets.some(function (v) { return v.community && v.community.favourite; });
+
+    // A small note when the community pass marked favourites, so the badges read clearly.
+    const pickNote = anyPick
+      ? '<div class="vet-pick-note">🐾 spots local pet owners recommend are marked and shown first</div>'
+      : '';
+
+    // "Also loved by locals" — community-recommended names that weren't in the nearby list;
+    // each links to a Google Maps search (no extra Places lookups needed).
+    const extrasHtml = extras.length
+      ? '<div class="vet-extras"><div class="vet-extras-label">🐾 Also loved by local pet owners</div>' +
+          extras.map(function (e) {
+            return '<a class="vet-extra" href="' + escHtml(e.searchUrl || '#') + '" target="_blank" rel="noopener">' +
+              '<span class="vet-extra-name">' + escHtml(e.name) + '</span>' +
+              (e.reason ? '<span class="vet-extra-why">' + escHtml(e.reason) + '</span>' : '') +
+            '</a>';
+          }).join('') +
+        '</div>'
+      : '';
+
     const el = document.createElement('div');
     el.className = 'message ai-message';
     el.innerHTML =
       '<div class="ai-avatar">W</div>' +
       '<div class="bubble-wrap">' +
         '<div class="vet-results-header">' + escHtml(m.header) + '</div>' +
+        pickNote +
         '<div class="vet-results">' +
           (vets.length
             ? vets.map(function (v) { return buildVetCard(v, m.booking); }).join('')
             : '<div class="vet-empty">' + escHtml(m.empty) + '</div>'
           ) +
         '</div>' +
+        extrasHtml +
         '<div class="meta">' + fmtTime(new Date()) + '</div>' +
       '</div>';
     messagesArea.appendChild(el);
@@ -1179,13 +1211,18 @@
           const qs = 'lat=' + pos.coords.latitude + '&lng=' + pos.coords.longitude +
             '&category=' + encodeURIComponent(category || 'vet') +
             (sessionId ? '&session_id=' + encodeURIComponent(sessionId) : '');
+          // The community pass can take a few seconds on the first lookup for an area, so
+          // show a typing indicator rather than a blank wait.
+          var typingEl = appendTypingIndicator();
+          scrollToBottom();
           fetch('/api/vets/nearby?' + qs)
             .then(function (r) { return r.json(); })
             .then(function (data) {
-              if (data.ok) { adoptVetSession(data); showVetResults(data.vets, data.category || category); }
+              if (typingEl) typingEl.remove();
+              if (data.ok) { adoptVetSession(data); showVetResults(data, data.category || category); }
               else { showVetError(data.error || 'Could not fetch nearby places.'); }
             })
-            .catch(function () { showVetError('Network error — please try again.'); });
+            .catch(function () { if (typingEl) typingEl.remove(); showVetError('Network error — please try again.'); });
         },
         function (err) {
           shareBtn.disabled = false;
