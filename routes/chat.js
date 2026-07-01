@@ -744,6 +744,17 @@ const PLACE_COPY = {
   cafe: { userMsg: 'Find pet-friendly cafés',    title: 'Pet-friendly spots', heading: 'Here are cafés & restaurants near you (call ahead to confirm they’re pet-friendly):', empty: 'I couldn’t find any cafés or restaurants within range. Try a wider area on Google Maps.' },
 };
 
+// Parks & cafés are COMMUNITY-ONLY: we show only the spots local pet owners recommend, not
+// raw nearby places (vets stay proximity-based). Copy for that mode.
+const COMMUNITY_ONLY_CATEGORIES = new Set(['park', 'cafe']);
+// Show up to this many community picks by default; the rest are revealed only when the
+// owner explicitly asks for more ("Show more places" in the UI).
+const RECOMMEND_DEFAULT = 7;
+const PLACE_COMMUNITY_COPY = {
+  park: { heading: '🐾 Parks that local pet owners recommend near you:', empty: 'I couldn’t find parks that local pet owners specifically recommend near you right now. Try again shortly, or widen your search on Google Maps.' },
+  cafe: { heading: '🐾 Pet-friendly cafés & spots that local pet owners recommend near you:', empty: 'I couldn’t find cafés that local pet owners specifically recommend near you right now. Try again shortly, or widen your search on Google Maps.' },
+};
+
 // GET /api/vets/nearby?lat=&lng=&radius=&category=vet|park|cafe
 // Returns up to 6 nearby places of the chosen category from Google Places.
 router.get('/api/vets/nearby', requireAuth, async (req, res) => {
@@ -761,9 +772,19 @@ router.get('/api/vets/nearby', requireAuth, async (req, res) => {
     // Layer community sentiment (Reddit/forum/web "what pet owners recommend") on top of
     // the real Google places: re-rank favourites to the top, annotate why, and collect a
     // few extra spots locals love. Fail-soft — returns the plain places on any error.
-    const community = await attachCommunity({ places, category });
-    const enrichedPlaces = community.places;
-    const extras = community.extras || [];
+    const community = await attachCommunity({ places, category, userLat: lat, userLng: lng });
+
+    // Vets: nearby clinics (with community picks floated up + "also loved" extras).
+    // Parks & cafés: ONLY the spots local pet owners recommend — no raw nearby list, sorted
+    // by distance and capped at RECOMMEND_DEFAULT (the rest go to `morePlaces`, revealed
+    // only when the owner explicitly asks to see more).
+    const communityOnly = COMMUNITY_ONLY_CATEGORIES.has(category);
+    const fullList = communityOnly ? community.recommended : community.places;
+    const displayPlaces = communityOnly ? fullList.slice(0, RECOMMEND_DEFAULT) : fullList;
+    const morePlaces = communityOnly ? fullList.slice(RECOMMEND_DEFAULT) : [];
+    const extras = communityOnly ? [] : (community.extras || []);
+    const heading = communityOnly ? PLACE_COMMUNITY_COPY[category].heading : copy.heading;
+    const emptyMsg = communityOnly ? PLACE_COMMUNITY_COPY[category].empty : copy.empty;
 
     // Persist as a chat turn so the search shows up in the sidebar and survives a
     // reload — same session handshake as a normal message. The live UI renders rich
@@ -778,22 +799,28 @@ router.get('/api/vets/nearby', requireAuth, async (req, res) => {
         sessionTitle = copy.title;
         await query('UPDATE conversation_session SET title = $2 WHERE id = $1', [sessionId, sessionTitle]);
       }
-      const answer = enrichedPlaces.length
-        ? copy.heading + '\n\n' + enrichedPlaces.map((v, i) =>
+      const answer = displayPlaces.length
+        ? heading + '\n\n' + displayPlaces.map((v, i) =>
             `${i + 1}. **${v.name}**` +
-            (v.community && v.community.favourite ? ' · 🐾 Community pick' : '') +
+            // In community-only mode every item is already a pet-owner pick, so don't badge each.
+            (!communityOnly && v.community && v.community.favourite ? ' · 🐾 Community pick' : '') +
             (v.rating ? ` — ⭐ ${v.rating}${v.reviews ? ` (${v.reviews})` : ''}` : '') +
             (v.open === true ? ' · Open now' : v.open === false ? ' · Closed' : '') +
+            (v.distanceLabel ? ` · ${v.distanceLabel} away` : '') +
             (v.address ? `\n${v.address}` : '') +
             (v.community && v.community.reason ? `\n_Why pet owners like it: ${v.community.reason}_` : '') +
             `\n[Directions](${v.mapsUrl})`,
           ).join('\n\n') +
           (extras.length ? `\n\n🐾 Also loved by local pet owners: ${extras.map(e => e.name).join(', ')}` : '')
-        : copy.empty;
+        : emptyMsg;
       await persistTurn({ petId: pet.id, sessionId, message: copy.userMsg, answer });
     }
 
-    res.json({ ok: true, category, vets: enrichedPlaces, community_extras: extras, session_id: sessionId || undefined, session_title: sessionTitle });
+    res.json({
+      ok: true, category, vets: displayPlaces, more_places: morePlaces, community_extras: extras,
+      community_only: communityOnly, heading, empty: emptyMsg,
+      session_id: sessionId || undefined, session_title: sessionTitle,
+    });
   } catch (err) {
     console.error('Place finder error:', err.message);
     const configErr = err.message.includes('GOOGLE_PLACES_API_KEY');

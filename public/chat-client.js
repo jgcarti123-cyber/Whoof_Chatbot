@@ -962,7 +962,8 @@
     },
   };
 
-  function buildVetCard(vet, allowBooking) {
+  function buildVetCard(vet, allowBooking, opts) {
+    opts = opts || {};
     const stars = vet.rating
       ? '★'.repeat(Math.round(vet.rating)) + '☆'.repeat(5 - Math.round(vet.rating))
       : null;
@@ -976,22 +977,33 @@
           '" data-phone="' + escHtml(vet.phone || '') + '">Draft booking</button>'
       : '';
     const community = vet.community || {};
-    const communityBadge = community.favourite
+    // In community-only mode (parks/cafés) the header already says these are pet-owner
+    // picks, so the per-card badge is redundant noise — suppress it.
+    const communityBadge = (community.favourite && !opts.hideBadge)
       ? '<span class="vet-community-badge">🐾 Community pick</span>'
       : '';
     const whyLine = community.favourite && community.reason
       ? '<div class="vet-card-why">' + escHtml(community.reason) + '</div>'
       : '';
+    const distHtml = vet.distanceLabel
+      ? '<span class="vet-card-dist">' +
+          '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>' +
+          escHtml(vet.distanceLabel) + ' away</span>'
+      : '';
+    const linkHtml = vet.mapsUrl
+      ? '<a class="vet-card-link" href="' + escHtml(vet.mapsUrl) + '" target="_blank" rel="noopener">Directions ↗</a>'
+      : '';
 
     return '<div class="vet-card' + (community.favourite ? ' vet-card--pick' : '') + '">' +
       '<div class="vet-card-name">' + escHtml(vet.name) + openBadge + communityBadge + '</div>' +
       (vet.address ? '<div class="vet-card-addr">' + escHtml(vet.address) + '</div>' : '') +
+      (distHtml ? '<div class="vet-card-meta-row">' + distHtml + '</div>' : '') +
       (stars ? '<div class="vet-card-rating"><span class="vet-stars">' + stars + '</span>' +
         '<span class="vet-rating-num">' + escHtml(String(vet.rating)) +
         (vet.reviews ? ' (' + vet.reviews + ')' : '') + '</span></div>' : '') +
       whyLine +
       '<div class="vet-card-actions">' +
-        '<a class="vet-card-link" href="' + escHtml(vet.mapsUrl) + '" target="_blank" rel="noopener">Directions ↗</a>' +
+        linkHtml +
         bookBtn +
       '</div>' +
     '</div>';
@@ -1037,16 +1049,27 @@
   function showVetResults(data, category) {
     const m = PLACE_META[category] || PLACE_META.vet;
     const vets = (data && data.vets) || [];
+    const morePlaces = (data && data.more_places) || [];
     const extras = (data && data.community_extras) || [];
-    const anyPick = vets.some(function (v) { return v.community && v.community.favourite; });
+    const communityOnly = !!(data && data.community_only);
+    const header = (data && data.heading) || m.header;
+    const emptyMsg = (data && data.empty) || m.empty;
 
-    // A small note when the community pass marked favourites, so the badges read clearly.
+    // "Show more places" — parks/cafés cap the default view; the rest are revealed only on
+    // this explicit click (per the "don't cross 7 unless asked" rule).
+    const moreBtnHtml = morePlaces.length
+      ? '<button type="button" class="vet-more-btn">Show ' + morePlaces.length + ' more place' + (morePlaces.length === 1 ? '' : 's') + '</button>'
+      : '';
+
+    // Vets: a note that community picks are marked + shown first. Parks/cafés: the header
+    // already says everything is a pet-owner pick, so no note (and no per-card badge).
+    const anyPick = !communityOnly && vets.some(function (v) { return v.community && v.community.favourite; });
     const pickNote = anyPick
       ? '<div class="vet-pick-note">🐾 spots local pet owners recommend are marked and shown first</div>'
       : '';
 
-    // "Also loved by locals" — community-recommended names that weren't in the nearby list;
-    // each links to a Google Maps search (no extra Places lookups needed).
+    // "Also loved by locals" — community names not in the nearby list (vets only; for
+    // parks/cafés these are already promoted into the main list).
     const extrasHtml = extras.length
       ? '<div class="vet-extras"><div class="vet-extras-label">🐾 Also loved by local pet owners</div>' +
           extras.map(function (e) {
@@ -1063,14 +1086,15 @@
     el.innerHTML =
       '<div class="ai-avatar">W</div>' +
       '<div class="bubble-wrap">' +
-        '<div class="vet-results-header">' + escHtml(m.header) + '</div>' +
+        '<div class="vet-results-header">' + escHtml(header) + '</div>' +
         pickNote +
         '<div class="vet-results">' +
           (vets.length
-            ? vets.map(function (v) { return buildVetCard(v, m.booking); }).join('')
-            : '<div class="vet-empty">' + escHtml(m.empty) + '</div>'
+            ? vets.map(function (v) { return buildVetCard(v, m.booking, { hideBadge: communityOnly }); }).join('')
+            : '<div class="vet-empty">' + escHtml(emptyMsg) + '</div>'
           ) +
         '</div>' +
+        moreBtnHtml +
         extrasHtml +
         '<div class="meta">' + fmtTime(new Date()) + '</div>' +
       '</div>';
@@ -1081,6 +1105,18 @@
         requestBookingDraft(btn.getAttribute('data-clinic'), btn.getAttribute('data-phone'), btn);
       });
     });
+    // "Show more places" — reveal the held-back picks (already fetched) into the same list.
+    const moreBtn = el.querySelector('.vet-more-btn');
+    if (moreBtn && morePlaces.length) {
+      moreBtn.addEventListener('click', function () {
+        const list = el.querySelector('.vet-results');
+        morePlaces.forEach(function (v) {
+          list.insertAdjacentHTML('beforeend', buildVetCard(v, m.booking, { hideBadge: communityOnly }));
+        });
+        moreBtn.remove();
+        scrollToBottom();
+      });
+    }
     scrollToBottom();
   }
 
