@@ -15,5 +15,6 @@ scripts/.pdf-hashes.json
 ingest-log.txt
 *.log
 whoof-responses.xlsx
+whoof-commit-log.xlsx
 # Office temp/lock files (created while a workbook is open)
 ~$*
