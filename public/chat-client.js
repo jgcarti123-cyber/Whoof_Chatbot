@@ -103,6 +103,57 @@
   input.addEventListener('blur', function () { setTimeout(hideSlashHint, 120); });
   input.addEventListener('keydown', function (e) {
     if (e.key === 'Escape' && !slashHint.hidden) hideSlashHint();
+    if (e.key === 'Escape' && replyState) hideReplyPreview();
+  });
+
+  // ── Reply to a specific earlier answer ────────────────────────────────────
+  // Tapping "Reply" on any past AI answer (live or reloaded from history) anchors the
+  // next message to that exact turn, so a follow-up stays grounded to it even if it's
+  // outside the ~5-exchange window the model normally sees. `replyState` holds
+  // { memoryId, snippet } while a reply is staged; cleared on send or cancel.
+  let replyState = null;
+  const inputArea = document.querySelector('.input-area');
+  const replyPreview = document.createElement('div');
+  replyPreview.className = 'reply-preview';
+  replyPreview.hidden = true;
+  if (inputArea && composerRow) inputArea.insertBefore(replyPreview, composerRow);
+  else if (composerRow) composerRow.appendChild(replyPreview);
+
+  function snippetOf(text, max) {
+    max = max || 140;
+    const clean = (text || '').replace(/\s+/g, ' ').trim();
+    return clean.length > max ? clean.slice(0, max - 1).trimEnd() + '…' : clean;
+  }
+
+  function showReplyPreview(memoryId, snippet) {
+    if (!memoryId) return;
+    replyState = { memoryId: memoryId, snippet: snippet };
+    replyPreview.innerHTML =
+      '<span class="reply-preview-label">↩ Replying to</span>' +
+      '<span class="reply-preview-text">' + escHtml(snippet) + '</span>' +
+      '<button type="button" class="reply-preview-cancel" aria-label="Cancel reply">×</button>';
+    replyPreview.hidden = false;
+    input.focus();
+  }
+
+  function hideReplyPreview() {
+    replyState = null;
+    replyPreview.hidden = true;
+    replyPreview.innerHTML = '';
+  }
+
+  replyPreview.addEventListener('click', function (e) {
+    if (e.target.closest('.reply-preview-cancel')) hideReplyPreview();
+  });
+
+  // Delegated — covers both live-appended AI messages and ones rendered server-side
+  // from history; both carry data-memory-id + data-answer-text on .ai-message.
+  messagesArea.addEventListener('click', function (e) {
+    const btn = e.target.closest('.msg-reply-btn');
+    if (!btn) return;
+    const host = btn.closest('.ai-message[data-memory-id]');
+    if (!host) return;
+    showReplyPreview(host.getAttribute('data-memory-id'), snippetOf(host.getAttribute('data-answer-text')));
   });
 
   // ── Sidebar chat actions (pin / delete) ───────────────────────────────────
@@ -160,18 +211,24 @@
     input.style.height = 'auto';
     hideSlashHint();
     const forceStructured = cmd.modality === 'structured' && cmd.cleaned.length > 0;
+    // Capture the staged reply (if any) before clearing it, so it carries through to
+    // both the sent-message quote and the request body.
+    const replyTo = replyState;
+    hideReplyPreview();
     // First message of a brand-new chat clears the hero so messages take over.
     const hero = messagesArea.querySelector('.empty-hero');
     if (hero) hero.remove();
     // Keep the full "/visualise …" text visible in the chat so the owner can see the
     // command was applied; the server strips it before the model sees the question.
-    appendUserMessage(raw);
-    postMessage(raw, [], { forceStructured });
+    appendUserMessage(raw, replyTo && replyTo.snippet);
+    postMessage(raw, [], { forceStructured, replyTo });
   }
 
   // Core request. `clarifications` is [] on a first ask, or the owner's triage
   // answers on the follow-up round. `opts.forceStructured` carries a /visualise
   // override through both rounds so a clarified answer still renders as a card.
+  // `opts.replyTo` ({memoryId, snippet}) likewise carries a staged reply through both
+  // rounds so a clarified answer still anchors to the quoted turn.
   function postMessage(text, clarifications, opts) {
     opts = opts || {};
     sendBtn.disabled = true;
@@ -184,6 +241,7 @@
       body: JSON.stringify({
         message: text, clarifications, session_id: sessionId,
         force_structured: opts.forceStructured === true ? true : undefined,
+        reply_to_memory_id: opts.replyTo ? opts.replyTo.memoryId : undefined,
       }),
     })
       .then(r => r.json())
@@ -216,11 +274,15 @@
       });
   }
 
-  function appendUserMessage(text) {
+  function appendUserMessage(text, replySnippet) {
     const el = document.createElement('div');
     el.className = 'message user-message';
+    const quoteHtml = replySnippet
+      ? `<div class="reply-quote">↩ ${escHtml(replySnippet)}</div>`
+      : '';
     el.innerHTML = `
       <div class="bubble-wrap">
+        ${quoteHtml}
         <div class="bubble">${escHtml(text)}</div>
         <div class="meta">${fmtTime(new Date())}</div>
       </div>`;
@@ -343,6 +405,10 @@
   function appendAIMessage(data) {
     const el = document.createElement('div');
     el.className = 'message ai-message' + (data.escalated ? ' emergency' : '');
+    // So the delegated "Reply" click handler and future reloads can find this turn — same
+    // attributes the server sets on history-rendered messages (views/chat.ejs).
+    if (data.memory_id) el.dataset.memoryId = data.memory_id;
+    el.dataset.answerText = data.answer || '';
 
     const emergencyBanner = data.escalated
       ? `<div class="emergency-banner">⚠️ URGENT — See a vet or emergency clinic now</div>`
@@ -407,9 +473,17 @@
       el.querySelector('.bubble-wrap').appendChild(card);
     }
 
-    // Rating widget — only on persisted turns. A needs_clarification round isn't saved
-    // to conversation_memory, so it carries no memory_id and gets no widget.
+    // Reply button + rating widget — only on persisted turns. A needs_clarification round
+    // isn't saved to conversation_memory, so it carries no memory_id and gets neither.
     if (data.memory_id) {
+      const actions = document.createElement('div');
+      actions.className = 'msg-actions';
+      actions.innerHTML =
+        '<button type="button" class="msg-reply-btn" title="Reply to this answer">' +
+          '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"></polyline><path d="M4 12h11a5 5 0 0 1 5 5v1"></path></svg>' +
+          'Reply' +
+        '</button>';
+      el.querySelector('.bubble-wrap').appendChild(actions);
       el.querySelector('.bubble-wrap').appendChild(buildFeedbackWidget(data.memory_id, null));
     }
   }

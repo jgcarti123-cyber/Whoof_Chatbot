@@ -69,19 +69,34 @@ const clearPending = (sessionId) => setPending(sessionId, null);
 
 // Persist one chat turn. Recall/confirmation/off-topic turns pass sources=[] and
 // confidence=null so they read as plain statements, not KB-grounded clinical claims.
-async function persistTurn({ petId, sessionId, message, answer, sources = [], confidence = null, escalated = false, escalationReason = null, symptomTags = [], structuredAnswer = null, responseModality = 'text', structuredTrigger = null }) {
+async function persistTurn({ petId, sessionId, message, answer, sources = [], confidence = null, escalated = false, escalationReason = null, symptomTags = [], structuredAnswer = null, responseModality = 'text', structuredTrigger = null, replyToMemoryId = null }) {
   const r = await query(
     `INSERT INTO conversation_memory (
        pet_id, session_id, owner_question, answer_summary, sources_cited,
        symptom_tags, confidence_level, escalated, escalation_reason,
-       structured_answer, response_modality, structured_trigger, structured_kind
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id, created_at`,
+       structured_answer, response_modality, structured_trigger, structured_kind,
+       reply_to_memory_id
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id, created_at`,
     [petId, sessionId, message, answer, JSON.stringify(sources), symptomTags, confidence, escalated, escalationReason,
      structuredAnswer ? JSON.stringify(structuredAnswer) : null, responseModality, structuredTrigger,
-     structuredAnswer ? (structuredAnswer.kind || null) : null],
+     structuredAnswer ? (structuredAnswer.kind || null) : null, replyToMemoryId],
   );
   await touchSession(sessionId);
   return r.rows[0];
+}
+
+// Look up the turn an owner tapped "Reply" on, scoped to this pet (ownership boundary —
+// same pattern as the feedback route's ownership check). Returns { question, answer } for
+// the system prompt, or null if the id is missing/invalid/not this pet's. Fail-soft: a
+// bad or stale id just means no reply context, never a hard error on the whole message.
+async function loadReplyTarget(petId, replyToMemoryId) {
+  if (!isUuid(replyToMemoryId)) return null;
+  const r = await query(
+    'SELECT owner_question, answer_summary FROM conversation_memory WHERE id = $1 AND pet_id = $2 LIMIT 1',
+    [replyToMemoryId, petId],
+  );
+  if (!r.rows.length) return null;
+  return { question: r.rows[0].owner_question, answer: r.rows[0].answer_summary || '' };
 }
 
 // A short, clean title for a new chat, derived from its first message.
@@ -205,14 +220,22 @@ router.get('/chat', requireAuth, async (req, res) => {
       const histResult = await query(
         `SELECT cm.id, cm.created_at, cm.owner_question, cm.answer_summary, cm.sources_cited,
                 cm.escalated, cm.confidence_level, cm.structured_answer,
+                rq.answer_summary AS reply_to_snippet,
                 rf.rating AS fb_rating, rf.tags AS fb_tags, rf.comment AS fb_comment
          FROM conversation_memory cm
          LEFT JOIN response_feedback rf ON rf.memory_id = cm.id
+         LEFT JOIN conversation_memory rq ON rq.id = cm.reply_to_memory_id
          WHERE cm.session_id = $1
          ORDER BY cm.created_at ASC LIMIT 200`,
         [activeSessionId],
       );
-      history = histResult.rows;
+      // Truncate the quoted snippet here so the template stays dumb.
+      history = histResult.rows.map(r => ({
+        ...r,
+        reply_to_snippet: r.reply_to_snippet
+          ? r.reply_to_snippet.replace(/\s+/g, ' ').trim().slice(0, 140)
+          : null,
+      }));
     }
 
     res.render('chat', { pet, history, sessions, activeSessionId, ownerName });
@@ -231,7 +254,7 @@ function enrichMessage(message, clarifications) {
 }
 
 // POST /api/chat/message
-// Body: { message: string, clarifications?: [{ question, answer }] }
+// Body: { message: string, clarifications?: [{ question, answer }], reply_to_memory_id?: string }
 router.post('/api/chat/message', requireAuth, async (req, res) => {
   const rawMessage = (req.body.message || '').trim();
   if (!rawMessage) return res.status(400).json({ error: 'Message is required.' });
@@ -244,6 +267,11 @@ router.post('/api/chat/message', requireAuth, async (req, res) => {
   const message = parsedCmd.cleaned || rawMessage;
   const forceStructured = (req.body.force_structured === true)
     || (parsedCmd.modality === 'structured' && parsedCmd.cleaned.length > 0);
+
+  // "Reply" to a specific earlier answer — the id itself is only trusted enough to look
+  // up; the actual quoted text used in the prompt always comes from our own DB lookup
+  // below (loadReplyTarget), never from client-supplied text.
+  const replyToMemoryId = isUuid(req.body.reply_to_memory_id) ? req.body.reply_to_memory_id : null;
 
   // Clarifying answers from a prior triage round (if the UI is on the 2nd submit)
   const clarifications = Array.isArray(req.body.clarifications)
@@ -370,6 +398,10 @@ router.post('/api/chat/message', requireAuth, async (req, res) => {
       console.warn('Breed lookup failed (run migration 009):', breedErr.message);
     }
 
+    // "Reply" to a specific earlier answer — may be well outside the recentHistory window
+    // built below. Fail-soft: a missing/stale/foreign id just means no reply context.
+    const replyTarget = await loadReplyTarget(pet.id, replyToMemoryId);
+
     // The chat this turn belongs to (creates one on the first message).
     const session = await resolveSession(pet.id, req.body.session_id, message);
     const sessionId = session.id;
@@ -436,6 +468,7 @@ router.post('/api/chat/message', requireAuth, async (req, res) => {
 
     const systemPrompt = buildSystemPrompt(pet, chunks, recentHistory, breedInfo, {
       clarifications, decisions, rollingSummary, ownerName: pet.owner_name || '', webResults,
+      replyTo: replyTarget,
     });
 
     // Generate the answer and (for a brand-new chat) a summary title.
@@ -531,6 +564,7 @@ router.post('/api/chat/message', requireAuth, async (req, res) => {
       sources: sourcesCited, confidence: confidenceLevel,
       escalated, escalationReason, symptomTags,
       structuredAnswer, responseModality, structuredTrigger,
+      replyToMemoryId: replyTarget ? replyToMemoryId : null,
     });
 
     res.json({
