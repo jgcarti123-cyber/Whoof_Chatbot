@@ -219,12 +219,15 @@
       <% history.forEach(function(msg) { %>
         <div class="message user-message">
           <div class="bubble-wrap">
+            <% if (msg.reply_to_snippet) { %>
+              <div class="reply-quote">↩ <%= msg.reply_to_snippet %></div>
+            <% } %>
             <div class="bubble"><%= msg.owner_question %></div>
             <div class="meta"><%= new Date(msg.created_at).toLocaleString('en-IN', {dateStyle:'medium', timeStyle:'short'}) %></div>
           </div>
         </div>
 
-        <div class="message ai-message <%= msg.escalated ? 'emergency' : '' %>" data-memory-id="<%= msg.id %>"<% if (msg.fb_rating) { %> data-feedback="<%= JSON.stringify({ rating: msg.fb_rating, tags: msg.fb_tags || [], comment: msg.fb_comment || '' }) %>"<% } %>>
+        <div class="message ai-message <%= msg.escalated ? 'emergency' : '' %>" data-memory-id="<%= msg.id %>" data-answer-text="<%= msg.answer_summary || '' %>"<% if (msg.fb_rating) { %> data-feedback="<%= JSON.stringify({ rating: msg.fb_rating, tags: msg.fb_tags || [], comment: msg.fb_comment || '' }) %>"<% } %>>
           <div class="ai-avatar">W</div>
           <div class="bubble-wrap">
             <% if (msg.escalated) { %>
@@ -256,6 +259,12 @@
                 <span class="confidence confidence-<%= msg.confidence_level %>"><%= msg.confidence_level %> confidence</span>
               </div>
             <% } %>
+            <div class="msg-actions">
+              <button type="button" class="msg-reply-btn" title="Reply to this answer">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"></polyline><path d="M4 12h11a5 5 0 0 1 5 5v1"></path></svg>
+                Reply
+              </button>
+            </div>
           </div>
         </div>
       <% }) %>

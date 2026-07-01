@@ -1727,3 +1727,47 @@ html.light .vet-date-input { color-scheme: light; }
 }
 .vet-sum-checklist { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: .3rem; }
 .vet-sum-checklist li { font-size: .88rem; line-height: 1.4; color: var(--text); }
+
+/* ── Reply to a specific earlier answer ──────────────────────────────────── */
+/* "Reply" button under each AI answer — hover-reveal on desktop, always-on where
+   there's no hover (touch devices), matching the "hover/tap" affordance decision. */
+.msg-actions { margin-top: .5rem; opacity: 0; transition: opacity .15s ease; }
+.ai-message:hover .msg-actions,
+.ai-message:focus-within .msg-actions { opacity: 1; }
+@media (hover: none) {
+  .msg-actions { opacity: 1; }
+}
+.msg-reply-btn {
+  display: inline-flex; align-items: center; gap: .3rem;
+  font-size: .78rem; font-weight: 600; color: var(--text-muted);
+  background: transparent; border: none; padding: 0; cursor: pointer;
+}
+.msg-reply-btn:hover { color: var(--primary); }
+
+/* Quote block — shown above a user bubble that replied to a specific earlier answer,
+   both live (composer preview) and on reload (persisted via reply_to_memory_id). */
+.reply-quote {
+  font-size: .78rem; line-height: 1.4; color: var(--text-muted);
+  background: var(--surface-2); border-left: 3px solid var(--primary);
+  border-radius: 0 8px 8px 0; padding: .3rem .55rem; margin-bottom: .4rem;
+}
+
+/* Staged-reply banner above the composer — appears when "Reply" is tapped, cleared on
+   send or cancel. Sits as a normal-flow sibling directly above .input-row. */
+.reply-preview {
+  display: flex; align-items: center; gap: .5rem;
+  width: min(760px, 100%); margin: 0 auto .5rem;
+  background: var(--surface); border: 1px solid var(--border);
+  border-left: 3px solid var(--primary); border-radius: 0 10px 10px 0;
+  padding: .45rem .7rem; font-size: .8rem;
+}
+.reply-preview-label { font-weight: 600; color: var(--primary); white-space: nowrap; }
+.reply-preview-text {
+  flex: 1; color: var(--text-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.reply-preview-cancel {
+  background: transparent; border: none; color: var(--text-muted);
+  font-size: 1.1rem; line-height: 1; cursor: pointer; padding: .1rem .3rem;
+}
+.reply-preview-cancel:hover { color: var(--danger); }
