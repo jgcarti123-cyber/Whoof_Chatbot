@@ -1146,7 +1146,7 @@ router.post('/api/vet/summary', requireAuth, async (req, res) => {
     let turns;
     if (hasVisit) {
       const r = await query(
-        `SELECT owner_question, answer_summary, escalated, created_at
+        `SELECT owner_question, answer_summary, escalated, escalation_reason, symptom_tags, created_at
            FROM conversation_memory
           WHERE pet_id = $1 AND created_at::date > $2::date
           ORDER BY created_at ASC LIMIT 100`,
@@ -1155,8 +1155,8 @@ router.post('/api/vet/summary', requireAuth, async (req, res) => {
       turns = r.rows;
     } else {
       const r = await query(
-        `SELECT owner_question, answer_summary, escalated, created_at FROM (
-           SELECT owner_question, answer_summary, escalated, created_at
+        `SELECT owner_question, answer_summary, escalated, escalation_reason, symptom_tags, created_at FROM (
+           SELECT owner_question, answer_summary, escalated, escalation_reason, symptom_tags, created_at
              FROM conversation_memory
             WHERE pet_id = $1 AND created_at > now() - interval '6 months'
             ORDER BY created_at DESC LIMIT 100
