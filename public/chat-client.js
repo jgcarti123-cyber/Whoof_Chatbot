@@ -1038,20 +1038,24 @@
   // each carries its JSON in a data attribute; swap the plain-text fallback for a live
   // card. Two kinds share this slot: a /visualise StructuredAnswer, and a Find result
   // (kind:'places') — without this branch, a Find turn would silently downgrade from
-  // live cards to plain markdown text on every reload.
-  document.querySelectorAll('.ai-content[data-structured]').forEach(function (host) {
-    try {
-      const ans = JSON.parse(host.getAttribute('data-structured'));
-      host.removeAttribute('data-structured');
-      if (ans && ans.kind === 'places') {
-        const built = buildVetResultsInner(ans.data, ans.category);
-        host.innerHTML = built.html;
-        built.wire(host);
-      } else {
-        host.replaceChildren(renderStructuredAnswer(ans));
-      }
-    } catch (e) { /* leave the fallback text in place */ }
-  });
+  // live cards to plain markdown text on every reload. Defined here but INVOKED lower down
+  // (after PLACE_META and buildVetResultsInner are initialized), since the places branch
+  // depends on them and `const` bindings sit in the temporal dead zone until their line runs.
+  function hydrateStructuredTurns() {
+    document.querySelectorAll('.ai-content[data-structured]').forEach(function (host) {
+      try {
+        const ans = JSON.parse(host.getAttribute('data-structured'));
+        host.removeAttribute('data-structured');
+        if (ans && ans.kind === 'places') {
+          const built = buildVetResultsInner(ans.data, ans.category);
+          host.innerHTML = built.html;
+          built.wire(host);
+        } else {
+          host.replaceChildren(renderStructuredAnswer(ans));
+        }
+      } catch (e) { /* leave the fallback text in place */ }
+    });
+  }
 
   // Attach rating widgets to the server-rendered history turns on page load.
   initHistoryFeedback();
@@ -1254,6 +1258,10 @@
     built.wire(el);
     scrollToBottom();
   }
+
+  // Now that PLACE_META + buildVetResultsInner exist, hydrate any server-rendered
+  // structured turns (including Find `places` cards) from the page-load history.
+  hydrateStructuredTurns();
 
   // Ask the server to draft a booking message for one clinic, then render it with
   // one-tap "Send via WhatsApp" / "Copy" actions. The reason is inferred server-side
