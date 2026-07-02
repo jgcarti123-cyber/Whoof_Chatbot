@@ -1422,6 +1422,37 @@ a:hover { text-decoration: underline; }
   transform: translateY(-1px);
 }
 
+/* Shared Groq daily-quota badge (rushiljohn10@gmail.com only) — a normal flex child of
+   .input-row, appended after .input-wrap, same as .find-btn sits before it. No absolute
+   positioning/pixel math: .input-wrap is flex:1, so it simply yields the badge's fixed
+   width automatically at any viewport, instead of guessing a "just outside the pill"
+   offset (which broke the moment .input-row's rendered width differed from the assumed
+   760px — the badge ended up glued to the send button, since it's actually a child of
+   .input-row, not the much-wider .input-area). */
+.quota-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  padding: 0 .8rem;
+  min-height: 34px;
+  border-radius: 999px;
+  background: hsl(0 0% 100% / .05);
+  border: 1px solid hsl(0 0% 100% / .1);
+  font-size: .76rem;
+  font-weight: 650;
+  color: var(--text-muted);
+  white-space: nowrap;
+  cursor: default;
+}
+.quota-badge-dot { width: 7px; height: 7px; border-radius: 50%; background: hsl(var(--c-success)); flex-shrink: 0; }
+.quota-badge--low { color: hsl(var(--c-danger)); border-color: hsl(var(--c-danger) / .4); }
+.quota-badge--low .quota-badge-dot { background: hsl(var(--c-danger)); }
+
+@media (max-width: 900px) {
+  .quota-badge { display: none !important; }
+}
+
 @media (max-width: 640px) {
   .input-area { --composer-nudge-x: 0px; }
   .input-area { padding: .55rem .8rem .85rem; }

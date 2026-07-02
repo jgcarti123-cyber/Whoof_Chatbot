@@ -156,6 +156,37 @@
     showReplyPreview(host.getAttribute('data-memory-id'), snippetOf(host.getAttribute('data-answer-text')));
   });
 
+  // ── Shared Groq daily quota badge (rushiljohn10@gmail.com only) ───────────
+  // Groq only exposes a per-MINUTE rate-limit bucket on live responses — the daily cap
+  // that's actually caused outages before is tracked server-side (lib/tokenUsage.js) and
+  // surfaced here only for the primary test account. The server is the sole gatekeeper
+  // (routes/chat.js checks the owner's email); this just renders whatever it returns.
+  const quotaBadge = document.createElement('div');
+  quotaBadge.className = 'quota-badge';
+  quotaBadge.hidden = true;
+  if (composerRow) composerRow.appendChild(quotaBadge);
+
+  function renderQuota(data) {
+    if (!data || !data.visible || !data.main) { quotaBadge.hidden = true; return; }
+    const pct = data.main.percentRemaining;
+    quotaBadge.classList.toggle('quota-badge--low', pct <= 15);
+    quotaBadge.innerHTML =
+      '<span class="quota-badge-dot"></span>' +
+      '<span class="quota-badge-text">' + pct + '% left today</span>';
+    quotaBadge.title = (data.all || []).map(function (s) {
+      return s.model + ': ' + s.remaining.toLocaleString() + ' / ' + s.limit.toLocaleString() + ' tokens left today';
+    }).join('\n');
+    quotaBadge.hidden = false;
+  }
+
+  function refreshQuota() {
+    fetch('/api/chat/quota')
+      .then(function (r) { return r.json(); })
+      .then(renderQuota)
+      .catch(function () { quotaBadge.hidden = true; });
+  }
+  refreshQuota();
+
   // ── Sidebar chat actions (pin / delete) ───────────────────────────────────
   // Delegated so it also covers chats injected after a new conversation starts.
   const sidebar = document.querySelector('.chat-sidebar');
@@ -258,8 +289,15 @@
           appendErrorMessage(data.error);
         } else if (data.needs_clarification) {
           appendClarification(data.original_message || text, data.clarifying_questions || [], opts);
+        } else if (data.place_prompt) {
+          // The owner asked (in plain language) to find nearby vets/parks/cafés — route into
+          // the SAME real Find pipeline instead of letting the model improvise a places list.
+          if (data.category && PLACE_META[data.category]) renderLocationCard(data.category, data.place_intro);
+          else showPlacePicker();
         } else {
           appendAIMessage(data);
+          // Each answer call consumes from the shared daily quota — refresh the badge.
+          refreshQuota();
         }
         scrollToBottom();
       })
@@ -1279,21 +1317,22 @@
     }
   }
 
-  function showLocationPrompt(category) {
+  // Renders the "share your location" card for a category and wires the geolocation →
+  // /api/vets/nearby → results flow. Split out of showLocationPrompt so the chat path
+  // (a typed "find me a cafe" question) can reuse the exact same Find pipeline without
+  // appending a duplicate "Find pet-friendly cafés" user bubble on top of what they typed.
+  function renderLocationCard(category, introText) {
     const m = PLACE_META[category] || PLACE_META.vet;
     // First action of a brand-new chat clears the hero so the conversation takes over.
     const hero = messagesArea.querySelector('.empty-hero');
     if (hero) hero.remove();
-
-    appendUserMessage(m.userMsg);
-    scrollToBottom();
 
     const el = document.createElement('div');
     el.className = 'message ai-message';
     const inner =
       '<div class="ai-avatar">W</div>' +
       '<div class="bubble-wrap">' +
-        '<div class="bubble">Sure! I need your location to ' + escHtml(m.prompt) + '.</div>' +
+        '<div class="bubble">' + escHtml(introText || ('Sure! I need your location to ' + m.prompt + '.')) + '</div>' +
         '<div class="vet-location-card" id="vet-location-card">' +
           '<button type="button" class="btn btn-primary" id="vet-share-location-btn">' +
             '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>' +
@@ -1346,6 +1385,14 @@
         { timeout: 10000 }
       );
     });
+  }
+
+  // Find-button flow: append the canonical "Find …" user bubble, then the location card.
+  function showLocationPrompt(category) {
+    const m = PLACE_META[category] || PLACE_META.vet;
+    appendUserMessage(m.userMsg);
+    scrollToBottom();
+    renderLocationCard(category);
   }
 
   // Wire the location button(s) → category picker (hero quick-pill + input icon button).

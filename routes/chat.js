@@ -13,10 +13,12 @@ const {
 const { findNearbyVets, findNearbyPlaces, searchPlaceByText, isValidCategory: isValidPlaceCategory } = require('../lib/vetFinder');
 const { draftBookingMessage } = require('../lib/booking');
 const { looksLikeBooking, detectBookingRequest } = require('../lib/bookingIntent');
+const { looksLikePlaceQuery, detectPlaceRequest } = require('../lib/placeIntent');
 const { attachCommunity } = require('../lib/communityPicks');
 const { generateVetSummaries } = require('../lib/vetSummary');
 const webSearch = require('../lib/webSearch');
 const { maybeUpdate: maybeUpdateExcel } = require('../lib/exportExcel');
+const { getQuotaSnapshot } = require('../lib/tokenUsage');
 
 const router = express.Router();
 
@@ -245,6 +247,34 @@ router.get('/chat', requireAuth, async (req, res) => {
   }
 });
 
+// GET /api/chat/quota — the shared Groq daily token quota, ONLY for the primary test
+// account. This is really an ops signal about the whole app's shared API rate limit
+// (Groq enforces it per-organization, not per Whoof user — there's no such thing as
+// "your personal tokens"), not something a real end customer should see or need to
+// understand, so it's gated the same way the Excel export is. Also only meaningful when
+// actually running on Groq — Anthropic's pricing/limits are a completely different shape.
+const QUOTA_VISIBLE_EMAIL = 'rushiljohn10@gmail.com';
+router.get('/api/chat/quota', requireAuth, async (req, res) => {
+  try {
+    if ((process.env.LLM_PROVIDER || 'anthropic').toLowerCase() !== 'groq') {
+      return res.json({ visible: false });
+    }
+    const ownerRes = await query('SELECT email FROM owners WHERE id = $1 LIMIT 1', [req.session.ownerId]);
+    if (ownerRes.rows[0]?.email !== QUOTA_VISIBLE_EMAIL) {
+      return res.json({ visible: false });
+    }
+    const snapshot = await getQuotaSnapshot();
+    // The main answer model has the tighter daily cap (100K vs the fast model's 500K)
+    // and is the one that's actually caused visible outages — surface it prominently.
+    const mainModel = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+    const main = snapshot.find(s => s.model === mainModel) || null;
+    res.json({ visible: true, main, all: snapshot });
+  } catch (err) {
+    console.error('Quota check error:', err.message);
+    res.json({ visible: false });
+  }
+});
+
 // Turns the owner's clarifying answers into one text block, appended to the
 // original question — used both for retrieval and for the answer's context.
 function enrichMessage(message, clarifications) {
@@ -336,6 +366,16 @@ router.post('/api/chat/message', requireAuth, async (req, res) => {
     // returns false (falls through to a normal answer) if it's not really a booking.
     if (clarifications.length === 0 && looksLikeBooking(message)) {
       const handled = await handleBookingRequest({ req, res, pet, message, rawMessage });
+      if (handled) return;
+    }
+
+    // ── "Find nearby places" request typed in chat? ────────────────────────────
+    // "what about cafés which are pet friendly", "any parks around here", "find a vet
+    // nearby" → route into the SAME real Places + community-picks pipeline the Find
+    // button uses (the client shows a location prompt, then /api/vets/nearby), instead
+    // of letting the model improvise an unverified list of place names.
+    if (clarifications.length === 0 && looksLikePlaceQuery(message)) {
+      const handled = await handlePlaceRequest({ req, res, message });
       if (handled) return;
     }
 
@@ -1040,6 +1080,48 @@ async function handleBookingRequest({ req, res, pet, message, rawMessage }) {
   });
   rollUpInactiveChats(pet.id, sessionId).catch(() => {});
   maybeUpdateExcel(req.session.ownerId).catch(() => {});
+  return true;
+}
+
+// Copy for the "let me find real spots" interstitial the client shows above the location
+// prompt when a place question is detected in chat.
+const PLACE_INTRO = {
+  vet:  'I can pull veterinary clinics near you — share your location and I\'ll find them.',
+  park: 'I can find parks that local pet owners recommend near you — share your location and I\'ll pull them up.',
+  cafe: 'I can find pet-friendly cafés that local pet owners recommend near you — share your location and I\'ll pull them up.',
+};
+
+// Handle a typed "find nearby places" request. Confirms the intent with the fast model,
+// then hands the client a `place_prompt` signal so it runs the SAME real Find pipeline
+// (location prompt → /api/vets/nearby → community-picks). Nothing is persisted here — the
+// results turn is persisted by /api/vets/nearby, exactly like the Find button. Returns true
+// if it owned the response, or false to let the normal answer path handle the message.
+async function handlePlaceRequest({ req, res, message }) {
+  const pet = await petForOwner(req.session.ownerId);
+  let recentHistory = [];
+  if (pet && isUuid(req.body.session_id)) {
+    const owned = await query(
+      'SELECT id FROM conversation_session WHERE id = $1 AND pet_id = $2 LIMIT 1',
+      [req.body.session_id, pet.id],
+    );
+    if (owned.rows.length) {
+      const h = await query(
+        `SELECT owner_question FROM conversation_memory
+         WHERE session_id = $1 ORDER BY created_at DESC LIMIT 5`,
+        [req.body.session_id],
+      );
+      recentHistory = h.rows.reverse();
+    }
+  }
+
+  const detect = await detectPlaceRequest({ message, recentHistory });
+  if (!detect.wants_places) return false; // not a place search → fall through to normal answer
+
+  res.json({
+    place_prompt: true,
+    category: detect.category || null,   // null → client shows the 3-way category picker
+    place_intro: detect.category ? PLACE_INTRO[detect.category] : undefined,
+  });
   return true;
 }
 
