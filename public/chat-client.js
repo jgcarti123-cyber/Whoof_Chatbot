@@ -1035,12 +1035,21 @@
   }
 
   // Hydrate structured-answer turns rendered server-side (chat history on page load):
-  // each carries its StructuredAnswer JSON in a data attribute; swap it for a live card.
+  // each carries its JSON in a data attribute; swap the plain-text fallback for a live
+  // card. Two kinds share this slot: a /visualise StructuredAnswer, and a Find result
+  // (kind:'places') — without this branch, a Find turn would silently downgrade from
+  // live cards to plain markdown text on every reload.
   document.querySelectorAll('.ai-content[data-structured]').forEach(function (host) {
     try {
       const ans = JSON.parse(host.getAttribute('data-structured'));
       host.removeAttribute('data-structured');
-      host.replaceChildren(renderStructuredAnswer(ans));
+      if (ans && ans.kind === 'places') {
+        const built = buildVetResultsInner(ans.data, ans.category);
+        host.innerHTML = built.html;
+        built.wire(host);
+      } else {
+        host.replaceChildren(renderStructuredAnswer(ans));
+      }
     } catch (e) { /* leave the fallback text in place */ }
   });
 
@@ -1158,7 +1167,12 @@
     scrollToBottom();
   }
 
-  function showVetResults(data, category) {
+  // Builds the inner HTML for a vet-results block plus a wiring function that attaches
+  // its booking/show-more handlers once the HTML is in the DOM. Shared by two call sites:
+  // showVetResults (a live search — appends a whole new message) and the history hydration
+  // below (swaps a persisted turn's markdown fallback for the same live cards on load), so
+  // a page reload never silently downgrades a Find result from cards to plain text.
+  function buildVetResultsInner(data, category) {
     const m = PLACE_META[category] || PLACE_META.vet;
     const vets = (data && data.vets) || [];
     const morePlaces = (data && data.more_places) || [];
@@ -1193,42 +1207,51 @@
         '</div>'
       : '';
 
+    const html =
+      '<div class="vet-results-header">' + escHtml(header) + '</div>' +
+      pickNote +
+      '<div class="vet-results">' +
+        (vets.length
+          ? vets.map(function (v) { return buildVetCard(v, m.booking, { hideBadge: communityOnly }); }).join('')
+          : '<div class="vet-empty">' + escHtml(emptyMsg) + '</div>'
+        ) +
+      '</div>' +
+      moreBtnHtml +
+      extrasHtml;
+
+    function wire(container) {
+      // Wire each card's "Draft booking" button (vets only; closure access to the helpers).
+      container.querySelectorAll('.vet-book-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          requestBookingDraft(btn.getAttribute('data-clinic'), btn.getAttribute('data-phone'), btn);
+        });
+      });
+      // "Show more places" — reveal the held-back picks (already fetched) into the same list.
+      const moreBtn = container.querySelector('.vet-more-btn');
+      if (moreBtn && morePlaces.length) {
+        moreBtn.addEventListener('click', function () {
+          const list = container.querySelector('.vet-results');
+          morePlaces.forEach(function (v) {
+            list.insertAdjacentHTML('beforeend', buildVetCard(v, m.booking, { hideBadge: communityOnly }));
+          });
+          moreBtn.remove();
+          scrollToBottom();
+        });
+      }
+    }
+
+    return { html, wire };
+  }
+
+  function showVetResults(data, category) {
+    const built = buildVetResultsInner(data, category);
     const el = document.createElement('div');
     el.className = 'message ai-message';
     el.innerHTML =
       '<div class="ai-avatar">W</div>' +
-      '<div class="bubble-wrap">' +
-        '<div class="vet-results-header">' + escHtml(header) + '</div>' +
-        pickNote +
-        '<div class="vet-results">' +
-          (vets.length
-            ? vets.map(function (v) { return buildVetCard(v, m.booking, { hideBadge: communityOnly }); }).join('')
-            : '<div class="vet-empty">' + escHtml(emptyMsg) + '</div>'
-          ) +
-        '</div>' +
-        moreBtnHtml +
-        extrasHtml +
-        '<div class="meta">' + fmtTime(new Date()) + '</div>' +
-      '</div>';
+      '<div class="bubble-wrap">' + built.html + '<div class="meta">' + fmtTime(new Date()) + '</div></div>';
     messagesArea.appendChild(el);
-    // Wire each card's "Draft booking" button (vets only; closure access to the helpers).
-    el.querySelectorAll('.vet-book-btn').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        requestBookingDraft(btn.getAttribute('data-clinic'), btn.getAttribute('data-phone'), btn);
-      });
-    });
-    // "Show more places" — reveal the held-back picks (already fetched) into the same list.
-    const moreBtn = el.querySelector('.vet-more-btn');
-    if (moreBtn && morePlaces.length) {
-      moreBtn.addEventListener('click', function () {
-        const list = el.querySelector('.vet-results');
-        morePlaces.forEach(function (v) {
-          list.insertAdjacentHTML('beforeend', buildVetCard(v, m.booking, { hideBadge: communityOnly }));
-        });
-        moreBtn.remove();
-        scrollToBottom();
-      });
-    }
+    built.wire(el);
     scrollToBottom();
   }
 

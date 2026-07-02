@@ -824,13 +824,24 @@ const COMMUNITY_ONLY_CATEGORIES = new Set(['park', 'cafe']);
 // Show up to this many community picks by default; the rest are revealed only when the
 // owner explicitly asks for more ("Show more places" in the UI).
 const RECOMMEND_DEFAULT = 7;
+// Show at least this many real places whenever that many exist nearby (per §6 of
+// CLAUDE.md) — applies uniformly to vets, parks, and cafés.
+const RECOMMEND_MIN = 5;
 const PLACE_COMMUNITY_COPY = {
   park: { heading: '🐾 Parks that local pet owners recommend near you:', empty: 'I couldn’t find parks that local pet owners specifically recommend near you right now. Try again shortly, or widen your search on Google Maps.' },
   cafe: { heading: '🐾 Pet-friendly cafés & spots that local pet owners recommend near you:', empty: 'I couldn’t find cafés that local pet owners specifically recommend near you right now. Try again shortly, or widen your search on Google Maps.' },
 };
+// When the community pass genuinely finds nothing (Tavily/LLM came up empty for that
+// specific area — happens occasionally), fall back to the real nearby list instead of a
+// dead end. Copy is honest about the fallback rather than implying these are vetted picks.
+const PLACE_FALLBACK_COPY = {
+  park: { heading: 'I couldn’t find parks specifically recommended by local pet owners nearby, but here are parks near you:' },
+  cafe: { heading: 'I couldn’t find cafés specifically recommended by local pet owners nearby, but here are cafés & restaurants near you (call ahead to confirm they’re pet-friendly):' },
+};
 
 // GET /api/vets/nearby?lat=&lng=&radius=&category=vet|park|cafe
-// Returns up to 6 nearby places of the chosen category from Google Places.
+// Returns 5–7 nearby places of the chosen category from Google Places (see RECOMMEND_MIN/
+// RECOMMEND_DEFAULT below), or fewer only when that many genuinely don't exist nearby.
 router.get('/api/vets/nearby', requireAuth, async (req, res) => {
   const lat = parseFloat(req.query.lat);
   const lng = parseFloat(req.query.lng);
@@ -849,20 +860,43 @@ router.get('/api/vets/nearby', requireAuth, async (req, res) => {
     const community = await attachCommunity({ places, category, userLat: lat, userLng: lng });
 
     // Vets: nearby clinics (with community picks floated up + "also loved" extras).
-    // Parks & cafés: ONLY the spots local pet owners recommend — no raw nearby list, sorted
-    // by distance and capped at RECOMMEND_DEFAULT (the rest go to `morePlaces`, revealed
-    // only when the owner explicitly asks to see more).
-    const communityOnly = COMMUNITY_ONLY_CATEGORIES.has(category);
-    const fullList = communityOnly ? community.recommended : community.places;
-    const displayPlaces = communityOnly ? fullList.slice(0, RECOMMEND_DEFAULT) : fullList;
-    const morePlaces = communityOnly ? fullList.slice(RECOMMEND_DEFAULT) : [];
+    // Parks & cafés: ONLY the spots local pet owners recommend — no raw nearby list.
+    // All three categories are shown/revealed the same way: sorted, capped at
+    // RECOMMEND_DEFAULT (the rest go to `morePlaces`, revealed only when the owner
+    // explicitly asks to see more), topped up to RECOMMEND_MIN when short.
+    const communityOnlyRequested = COMMUNITY_ONLY_CATEGORIES.has(category);
+    let fullList = communityOnlyRequested ? community.recommended : community.places;
+    let communityOnly = communityOnlyRequested;
+    // The community pass can legitimately come up empty for a specific area (Tavily/LLM
+    // found nothing to extract) — that's not rare enough to leave the owner with a dead
+    // end, so fall back to the real (still Google-verified) nearby list instead of nothing.
+    let usedEmptyFallback = false;
+    if (communityOnlyRequested && fullList.length === 0 && community.places.length > 0) {
+      fullList = community.places;
+      communityOnly = false;
+      usedEmptyFallback = true;
+    }
+    // The community pass can also come up short (1–4 recommended spots) rather than
+    // empty — top up with the remaining real nearby places (never invented) so the owner
+    // still sees at least RECOMMEND_MIN when that many genuinely exist nearby.
+    if (communityOnly && fullList.length > 0 && fullList.length < RECOMMEND_MIN) {
+      const seen = new Set(fullList.map(p => p.mapsUrl || p.name));
+      const topUp = community.places.filter(p => !seen.has(p.mapsUrl || p.name));
+      fullList = fullList.concat(topUp.slice(0, RECOMMEND_MIN - fullList.length));
+    }
+    const displayPlaces = fullList.slice(0, RECOMMEND_DEFAULT);
+    const morePlaces = fullList.slice(RECOMMEND_DEFAULT);
     const extras = communityOnly ? [] : (community.extras || []);
-    const heading = communityOnly ? PLACE_COMMUNITY_COPY[category].heading : copy.heading;
-    const emptyMsg = communityOnly ? PLACE_COMMUNITY_COPY[category].empty : copy.empty;
+    const heading = communityOnly
+      ? PLACE_COMMUNITY_COPY[category].heading
+      : (usedEmptyFallback ? PLACE_FALLBACK_COPY[category].heading : copy.heading);
+    const emptyMsg = communityOnlyRequested ? PLACE_COMMUNITY_COPY[category].empty : copy.empty;
 
     // Persist as a chat turn so the search shows up in the sidebar and survives a
-    // reload — same session handshake as a normal message. The live UI renders rich
-    // cards; the stored markdown is what re-renders on reload.
+    // reload — same session handshake as a normal message. Stored as structured data
+    // (reusing the /visualise structured_answer column with kind:'places') so a reload
+    // hydrates back into the SAME live cards instead of degrading to plain markdown text;
+    // answer_summary still gets the markdown rendering as the accessible/fallback text.
     let sessionId = null;
     let sessionTitle;
     const pet = await petForOwner(req.session.ownerId);
@@ -887,7 +921,21 @@ router.get('/api/vets/nearby', requireAuth, async (req, res) => {
           ).join('\n\n') +
           (extras.length ? `\n\n🐾 Also loved by local pet owners: ${extras.map(e => e.name).join(', ')}` : '')
         : emptyMsg;
-      await persistTurn({ petId: pet.id, sessionId, message: copy.userMsg, answer });
+      const structuredAnswer = {
+        kind: 'places',
+        category,
+        data: {
+          vets: displayPlaces, more_places: morePlaces, community_extras: extras,
+          community_only: communityOnly, heading, empty: emptyMsg,
+        },
+      };
+      await persistTurn({
+        // response_modality's DB check constraint only allows 'text'|'structured' — 'places'
+        // is carried in structured_kind (set automatically from structuredAnswer.kind below),
+        // not as a modality of its own.
+        petId: pet.id, sessionId, message: copy.userMsg, answer,
+        structuredAnswer, responseModality: 'structured',
+      });
     }
 
     res.json({
