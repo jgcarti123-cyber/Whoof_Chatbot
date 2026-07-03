@@ -331,7 +331,7 @@
     const el = document.createElement('div');
     el.className = 'message ai-message typing-indicator';
     el.innerHTML = `
-      <div class="ai-avatar">W</div>
+      <div class="ai-avatar">P</div>
       <div class="bubble-wrap">
         <div class="bubble">
           <span class="typing-dot"></span>
@@ -369,13 +369,13 @@
     }).join('');
 
     el.innerHTML = `
-      <div class="ai-avatar">W</div>
+      <div class="ai-avatar">P</div>
       <div class="bubble-wrap">
         <div class="bubble">
           <div class="clarify-intro">${escHtml(intro)}</div>
           <div class="clarify-card">
             ${qBlocks}
-            <button type="button" class="btn btn-primary clarify-submit" disabled>Get Whoof AI's answer</button>
+            <button type="button" class="btn btn-primary clarify-submit" disabled>Get the answer</button>
           </div>
         </div>
       </div>`;
@@ -470,7 +470,7 @@
     // "General guidance" badge when the answer came from Claude's own knowledge
     // rather than the cited guideline documents.
     const fallbackBadge = (data.used_fallback && !data.off_topic && !data.escalated)
-      ? `<span class="badge badge-general" title="Not from a cited guideline — Whoof AI's general veterinary knowledge">general guidance</span>`
+      ? `<span class="badge badge-general" title="Not from a cited guideline — Prim Pets' general veterinary knowledge">general guidance</span>`
       : '';
 
     // Confidence shows only on KB-grounded clinical answers — recall/decision/off-topic
@@ -480,7 +480,7 @@
       : '';
 
     el.innerHTML = `
-      <div class="ai-avatar">W</div>
+      <div class="ai-avatar">P</div>
       <div class="bubble-wrap">
         ${emergencyBanner}
         <div class="ai-content"></div>
@@ -949,7 +949,7 @@
     const el = document.createElement('div');
     el.className = 'message ai-message';
     el.innerHTML = `
-      <div class="ai-avatar">W</div>
+      <div class="ai-avatar">P</div>
       <div class="bubble-wrap">
         <div class="bubble" style="color: var(--danger)">⚠️ ${escHtml(msg)}</div>
       </div>`;
@@ -1151,7 +1151,7 @@
     const el = document.createElement('div');
     el.className = 'message ai-message';
     el.innerHTML =
-      '<div class="ai-avatar">W</div>' +
+      '<div class="ai-avatar">P</div>' +
       '<div class="bubble-wrap">' +
         '<div class="bubble">What would you like to find near you?</div>' +
         '<div class="place-pick-grid">' + cards + '</div>' +
@@ -1252,7 +1252,7 @@
     const el = document.createElement('div');
     el.className = 'message ai-message';
     el.innerHTML =
-      '<div class="ai-avatar">W</div>' +
+      '<div class="ai-avatar">P</div>' +
       '<div class="bubble-wrap">' + built.html + '<div class="meta">' + fmtTime(new Date()) + '</div></div>';
     messagesArea.appendChild(el);
     built.wire(el);
@@ -1296,7 +1296,7 @@
           '" target="_blank" rel="noopener">Send via WhatsApp ↗</a>'
       : '<span class="booking-nophone">No phone number on file — copy the message and send it yourself.</span>';
     el.innerHTML =
-      '<div class="ai-avatar">W</div>' +
+      '<div class="ai-avatar">P</div>' +
       '<div class="bubble-wrap">' +
         '<div class="booking-card">' +
           '<div class="booking-card-head">Booking draft for ' + escHtml(data.clinic_name) + '</div>' +
@@ -1332,7 +1332,7 @@
     const el = document.createElement('div');
     el.className = 'message ai-message';
     el.innerHTML =
-      '<div class="ai-avatar">W</div>' +
+      '<div class="ai-avatar">P</div>' +
       '<div class="bubble-wrap"><div class="bubble">' + escHtml(msg) + '</div></div>';
     messagesArea.appendChild(el);
     scrollToBottom();
@@ -1361,7 +1361,7 @@
     const el = document.createElement('div');
     el.className = 'message ai-message';
     const inner =
-      '<div class="ai-avatar">W</div>' +
+      '<div class="ai-avatar">P</div>' +
       '<div class="bubble-wrap">' +
         '<div class="bubble">' + escHtml(introText || ('Sure! I need your location to ' + m.prompt + '.')) + '</div>' +
         '<div class="vet-location-card" id="vet-location-card">' +
@@ -1426,11 +1426,65 @@
     renderLocationCard(category);
   }
 
-  // Wire the location button(s) → category picker (hero quick-pill + input icon button).
+  // Wire the location button(s) → category picker (sidebar "Find nearby" + input Find button).
   ['vet-finder-btn', 'vet-finder-btn-toolbar'].forEach(function (id) {
     const btn = document.getElementById(id);
     if (btn) btn.addEventListener('click', showPlacePicker);
   });
+
+  // Hero pills (empty state): place pills jump straight to their category, skipping the
+  // picker; the briefing pill opens the My Vet panel's prep flow.
+  document.querySelectorAll('.hero-pill-place[data-category]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      showLocationPrompt(btn.getAttribute('data-category'));
+    });
+  });
+  const heroBriefBtn = document.getElementById('hero-briefing-btn');
+  if (heroBriefBtn) {
+    heroBriefBtn.addEventListener('click', function () {
+      const panelBody = document.getElementById('vet-panel-body');
+      const panelToggle = document.getElementById('vet-panel-toggle');
+      if (panelBody && panelBody.hidden && panelToggle) panelToggle.click();
+      const prep = document.getElementById('vet-prep-btn');
+      if (prep) prep.click();
+    });
+  }
+
+  // ── Sidebar collapse / expand ────────────────────────────────────────────
+  // Desktop: the collapse button hides the panel (persisted); the floating button
+  // brings it back. Mobile (≤640px): the sidebar is an off-canvas drawer — the
+  // floating button opens it over a scrim, and the scrim / collapse button /
+  // drawer actions close it. Drawer state is never persisted.
+  (function initSidebarCollapse() {
+    const collapseBtn = document.getElementById('sb-collapse-btn');
+    const openBtn = document.getElementById('sb-open-btn');
+    const scrim = document.getElementById('sb-scrim');
+    const sidebar = document.querySelector('.chat-sidebar');
+    if (!collapseBtn || !openBtn) return;
+    const mq = window.matchMedia('(max-width: 640px)');
+    function setCollapsed(collapsed) {
+      document.body.classList.toggle('sb-collapsed', collapsed);
+      try { localStorage.setItem('pp-sidebar-collapsed', collapsed ? '1' : '0'); } catch (e) { /* noop */ }
+    }
+    function closeDrawer() { document.body.classList.remove('sb-mobile-open'); }
+    collapseBtn.addEventListener('click', function () {
+      if (mq.matches) closeDrawer();
+      else setCollapsed(true);
+    });
+    openBtn.addEventListener('click', function () {
+      if (mq.matches) document.body.classList.add('sb-mobile-open');
+      else setCollapsed(false);
+    });
+    if (scrim) scrim.addEventListener('click', closeDrawer);
+    // Actions that render into the chat area should reveal it: close the drawer.
+    if (sidebar) {
+      sidebar.addEventListener('click', function (e) {
+        if (!mq.matches) return;
+        if (e.target.closest('#vet-finder-btn') || e.target.closest('.vet-range-opt')) closeDrawer();
+      });
+    }
+    try { if (localStorage.getItem('pp-sidebar-collapsed') === '1') setCollapsed(true); } catch (e) { /* noop */ }
+  })();
 
   // ── Sidebar drag-to-resize ───────────────────────────────────────────────
   (function initSidebarResize() {
@@ -1698,7 +1752,7 @@
 
     const loading = document.createElement('div');
     loading.className = 'message ai-message';
-    loading.innerHTML = '<div class="ai-avatar">W</div><div class="bubble-wrap"><div class="bubble">Putting together a summary for your vet…</div></div>';
+    loading.innerHTML = '<div class="ai-avatar">P</div><div class="bubble-wrap"><div class="bubble">Putting together a summary for your vet…</div></div>';
     messagesArea.appendChild(loading);
     scrollToBottom();
 
@@ -1735,7 +1789,7 @@
     const el = document.createElement('div');
     el.className = 'message ai-message';
     el.innerHTML =
-      '<div class="ai-avatar">W</div>' +
+      '<div class="ai-avatar">P</div>' +
       '<div class="bubble-wrap">' +
         '<div class="vet-sum-card">' +
           rangeNote +

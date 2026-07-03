@@ -52,15 +52,19 @@
 
 /* ─── Light theme ─────────────────────────────────────────────────── */
 html.light {
-  --c-bg:        240 17% 97%;   /* near-white, slight cool tint   */
+  --c-bg:        40 20% 95%;    /* warm cream (matches the landing)  */
   --c-surface:   0 0% 100%;     /* pure white cards               */
-  --c-surface-2: 240 14% 94%;   /* input, hover surfaces          */
-  --c-border:    240 13% 88%;   /* subtle lines                   */
-  --c-fg:        222 32% 12%;   /* near-black text                */
-  --c-muted:     222 11% 48%;   /* secondary text                 */
-  --shadow:      0 2px 14px rgba(20,20,40,.09);
-  --brand-glow:    0 0 24px hsl(var(--c-brand) / .22);
-  --brand-glow-sm: 0 0 10px hsl(var(--c-brand) / .18);
+  --c-surface-2: 40 14% 92%;    /* input, hover surfaces          */
+  --c-border:    40 8% 86%;     /* subtle lines                   */
+  --c-fg:        9 17% 8%;      /* coffee-black text              */
+  --c-muted:     30 6% 46%;     /* secondary text                 */
+  /* Brand flips from violet to coffee bean (#1A1110) in light mode — the whole
+     user-facing app runs light; dark (admin tooling) keeps the violet. */
+  --c-brand:     6 24% 8%;      /* coffee bean #1A1110 — signature */
+  --c-brand-2:   15 20% 24%;    /* warm roast — keeps gradients subtle */
+  --shadow:      0 2px 14px rgba(30,24,18,.09);
+  --brand-glow:    0 0 24px hsl(var(--c-brand) / .16);
+  --brand-glow-sm: 0 0 10px hsl(var(--c-brand) / .12);
 }
 
 /* ─── Auth page light overrides ───────────────────────────────────── */
@@ -1001,13 +1005,14 @@ a:hover { text-decoration: underline; }
 
 /* App icon used as the brand mark everywhere. */
 .brand-mark {
-  display: block; flex-shrink: 0; border-radius: 22%; object-fit: cover;
-  /* The icon art is white-eyed and designed for a dark backdrop, so the chip
-     keeps its own near-black background in BOTH themes (like any app icon).
-     This stops the white eye from vanishing on a white container in light mode. */
-  background: #15171e;
-  border: 1px solid hsl(240 6% 26%);
+  display: block; flex-shrink: 0; border-radius: 22%; object-fit: contain;
+  /* The Prim Pets mark is a dark glossy ribbon (3:2 art with alpha), so the chip
+     keeps its own light background in BOTH themes (like any app icon) — on a dark
+     container the mark would vanish, and `contain` stops the wide art being cropped. */
+  background: #F4F2ED;
+  border: 1px solid rgba(0,0,0,.10);
   box-shadow: 0 1px 3px rgba(0,0,0,.22);
+  padding: 6%;
 }
 .brand-mark-xs { width: 26px; height: 26px; }
 .brand-mark-sm { width: 34px; height: 34px; }

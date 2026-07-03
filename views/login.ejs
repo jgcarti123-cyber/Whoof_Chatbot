@@ -3,102 +3,321 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Whoof — Vet AI</title>
-  <link rel="icon" type="image/png" sizes="1024x1024" href="/whoof-icon.png">
-  <link rel="apple-touch-icon" href="/whoof-icon.png">
+  <title>Prim Pets — Vet care that remembers your dog</title>
+  <link rel="icon" type="image/png" href="/Prim_Pets.png">
+  <link rel="apple-touch-icon" href="/Prim_Pets.png">
   <link rel="manifest" href="/site.webmanifest">
-  <meta name="theme-color" content="#1A1A1A">
+  <meta name="theme-color" content="#F4F2ED">
   <link rel="stylesheet" href="/style.css">
-  <script>(function(){var t=localStorage.getItem('whoof-theme')||(window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');if(t==='light')document.documentElement.classList.add('light');})();</script>
+  <link rel="preload" as="image" href="/16_9.png">
+  <style>
+    /* ── Landing + login (self-contained; leans on style.css only for @font-face) ── */
+    .landing, .landing * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    .landing {
+      font-family: 'CabinetGrotesk', -apple-system, sans-serif;
+      background: #F4F2ED;
+      color: #121110;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+
+    /* Floating nav pill */
+    .lp-nav {
+      position: fixed; top: 18px; left: 18px; right: 18px; z-index: 50;
+      display: flex; align-items: center; justify-content: space-between;
+      pointer-events: none;
+    }
+    .lp-nav-brand, .lp-nav-cta { pointer-events: auto; }
+    .lp-nav-brand {
+      display: inline-flex; align-items: center; gap: 10px;
+      background: #fff; border-radius: 14px; padding: 10px 18px 10px 12px;
+      box-shadow: 0 1px 2px rgba(18,17,16,.06), 0 8px 24px rgba(18,17,16,.07);
+      text-decoration: none; color: #121110;
+    }
+    .lp-nav-brand img { width: 36px; height: 24px; object-fit: contain; display: block; }
+    .lp-nav-brand span { font-weight: 800; font-size: 1.05rem; letter-spacing: -0.01em; }
+    .lp-nav-cta {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: #121110; color: #F4F2ED;
+      border: 0; border-radius: 14px; padding: 13px 22px;
+      font-family: inherit; font-weight: 700; font-size: .95rem; letter-spacing: .01em;
+      cursor: pointer;
+      box-shadow: 0 8px 24px rgba(18,17,16,.18);
+      transition: transform .25s cubic-bezier(.2,.7,.2,1), background .25s;
+    }
+    .lp-nav-cta:hover { transform: translateY(-1px); background: #000; }
+    .lp-nav-cta svg { transition: transform .25s; }
+    .lp-nav-cta:hover svg { transform: translateY(2px); }
+
+    /* ── Hero — 75svh tall so the dark login section peeks ~a quarter into the
+       first viewport (the TinyWins move); type sits at the top, stats at the bottom. ── */
+    .lp-hero {
+      min-height: 75svh;
+      display: flex; flex-direction: column; justify-content: space-between;
+      padding: clamp(84px, 11vh, 118px) clamp(20px, 3.5vw, 56px) 0;
+      overflow: hidden;
+    }
+    .lp-hero-type { flex: 1; display: flex; flex-direction: column; justify-content: flex-start; gap: clamp(14px, 3vh, 32px); }
+    .lp-line {
+      font-weight: 900;
+      font-size: clamp(2.9rem, 9.5vw, 9.5rem);
+      line-height: .9;
+      letter-spacing: -0.035em;
+      text-transform: uppercase;
+      white-space: nowrap;
+      will-change: transform;
+    }
+    .lp-line-a { align-self: flex-start; text-align: left; }
+    .lp-line-b { align-self: flex-end; text-align: right; }
+
+    /* Stats strip */
+    .lp-stats {
+      display: flex; justify-content: space-between; gap: 24px;
+      border-top: 1px solid rgba(18,17,16,.14);
+      padding: 22px 0 26px;
+      font-weight: 700; font-size: clamp(.85rem, 1.15vw, 1.05rem);
+      letter-spacing: -0.005em;
+    }
+    .lp-stats span:nth-child(2) { text-align: center; }
+    .lp-stats span:last-child { text-align: right; }
+
+    /* ── Login section ── */
+    .lp-login {
+      position: relative;
+      min-height: 100svh;
+      display: flex; align-items: center;
+      background: #1A1109 url('/16_9.png') center / cover no-repeat;
+    }
+    .lp-login::before {
+      content: '';
+      position: absolute; inset: 0;
+      background:
+        linear-gradient(to right, rgba(16,10,4,.88) 0%, rgba(16,10,4,.62) 42%, rgba(16,10,4,.12) 78%, rgba(16,10,4,.28) 100%),
+        linear-gradient(to top, rgba(16,10,4,.55), transparent 30%);
+    }
+    .lp-login-inner {
+      position: relative; z-index: 1;
+      width: 100%;
+      max-width: 1240px; margin: 0 auto;
+      padding: clamp(96px, 14vh, 150px) clamp(22px, 4vw, 56px) clamp(56px, 8vh, 96px);
+    }
+    .lp-login-content { max-width: 420px; color: #fff; }
+
+    .lp-eyebrow {
+      display: inline-flex; align-items: center; gap: 10px;
+      font-size: .7rem; font-weight: 700; letter-spacing: .24em; text-transform: uppercase;
+      color: rgba(255,255,255,.6);
+      margin-bottom: 18px;
+    }
+    .lp-eyebrow::before { content: ''; width: 24px; height: 1px; background: rgba(255,255,255,.4); }
+
+    .lp-login-title {
+      font-weight: 900;
+      font-size: clamp(2.1rem, 3.8vw, 3.1rem);
+      line-height: .95; letter-spacing: -0.03em;
+      text-transform: uppercase;
+      color: #F6F1E7;
+      margin-bottom: 12px;
+    }
+    .lp-login-sub {
+      font-size: .93rem; font-weight: 500; line-height: 1.55;
+      color: rgba(255,255,255,.66);
+      margin-bottom: 28px;
+      max-width: 360px;
+    }
+
+    /* Form — a quiet frosted panel holding slim underline fields */
+    .lp-form-card {
+      background: rgba(14, 9, 4, .38);
+      border: 1px solid rgba(255,255,255,.10);
+      border-radius: 20px;
+      padding: 26px 26px 28px;
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      box-shadow: 0 24px 60px rgba(0,0,0,.35);
+    }
+    .lp-alert {
+      background: rgba(180, 40, 30, .32);
+      border: 1px solid rgba(255, 120, 100, .45);
+      color: #FFD9D2;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: .85rem; font-weight: 600;
+      margin-bottom: 20px;
+    }
+    .lp-field { margin-bottom: 20px; }
+    .lp-field label {
+      display: block;
+      font-size: .66rem; font-weight: 700; letter-spacing: .18em; text-transform: uppercase;
+      color: rgba(255,255,255,.55);
+      margin-bottom: 7px;
+    }
+    .lp-field label .lp-hint { text-transform: none; letter-spacing: .02em; font-weight: 500; color: rgba(255,255,255,.38); margin-left: 8px; }
+    .lp-field input {
+      width: 100%;
+      background: transparent;
+      border: 0; border-bottom: 1px solid rgba(255,255,255,.28);
+      border-radius: 0;
+      padding: 7px 2px 9px;
+      font-family: inherit; font-size: 1rem; font-weight: 600;
+      color: #fff;
+      outline: none;
+      transition: border-color .25s;
+      caret-color: #fff;
+    }
+    .lp-field input::placeholder { color: rgba(255,255,255,.30); font-weight: 500; }
+    .lp-field input:focus { border-bottom-color: #fff; }
+    .lp-field input:-webkit-autofill,
+    .lp-field input:-webkit-autofill:hover,
+    .lp-field input:-webkit-autofill:focus {
+      -webkit-text-fill-color: #fff;
+      -webkit-box-shadow: 0 0 0 1000px rgba(26,17,9,0) inset;
+      transition: background-color 9999s ease-in-out 0s;
+    }
+
+    .lp-remember {
+      display: inline-flex; align-items: center; gap: 9px;
+      margin: 0 0 22px;
+      cursor: pointer; user-select: none;
+      color: rgba(255,255,255,.66); font-size: .85rem; font-weight: 600;
+    }
+    .lp-remember input { accent-color: #F6F1E7; width: 14px; height: 14px; cursor: pointer; }
+
+    .lp-submit {
+      display: block; width: 100%;
+      background: #F6F1E7; color: #14100A;
+      border: 0; border-radius: 12px;
+      padding: 14px 22px;
+      font-family: inherit; font-size: .88rem; font-weight: 800; letter-spacing: .09em; text-transform: uppercase;
+      cursor: pointer;
+      transition: transform .25s cubic-bezier(.2,.7,.2,1), box-shadow .25s, background .25s;
+      box-shadow: 0 10px 28px rgba(0,0,0,.3);
+    }
+    .lp-submit:hover { transform: translateY(-1px); background: #fff; box-shadow: 0 14px 36px rgba(0,0,0,.4); }
+    .lp-submit:active { transform: translateY(0); }
+
+    .lp-help { margin-top: 18px; font-size: .8rem; font-weight: 500; color: rgba(255,255,255,.45); }
+
+    /* ── Responsive ── */
+    @media (max-width: 720px) {
+      .lp-nav { top: 12px; left: 12px; right: 12px; }
+      .lp-nav-cta { padding: 11px 18px; }
+      .lp-line { white-space: normal; }
+      .lp-stats { flex-direction: column; gap: 10px; padding: 18px 0 22px; }
+      .lp-stats span:nth-child(2), .lp-stats span:last-child { text-align: left; }
+      .lp-login::before {
+        background: linear-gradient(to top, rgba(16,10,4,.92) 30%, rgba(16,10,4,.55) 70%, rgba(16,10,4,.35) 100%);
+      }
+      .lp-form-card { padding: 20px 18px 22px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .lp-line { transform: none !important; }
+    }
+  </style>
 </head>
-<body class="auth-split">
+<body class="landing">
 
-  <div class="auth-shell">
-    <aside class="auth-aside">
-      <div class="auth-aside-glow"></div>
-      <div class="auth-aside-content">
-        <div class="auth-brand">
-          <img class="brand-mark brand-mark-sm" src="/whoof-icon.png" alt="">
-          <span class="brand-gradient-text">Whoof</span>
-        </div>
-        <h1>Vet care that remembers your dog.</h1>
-        <p>Log in to continue with answers shaped around your dog's profile, history, diet, and routine care.</p>
-        <ol class="stepper">
-          <li class="step active">
-            <span class="step-num">1</span>
-            <div>
-              <div class="step-title">Log in with your access code</div>
-              <div class="step-desc">Sent to you by the Whoof team</div>
+  <nav class="lp-nav">
+    <a class="lp-nav-brand" href="/">
+      <img src="/Prim_Pets.png" alt="">
+      <span>Prim Pets</span>
+    </a>
+    <button type="button" class="lp-nav-cta" id="lp-login-btn">
+      Log in
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="4" x2="12" y2="20"></line><polyline points="6 14 12 20 18 14"></polyline></svg>
+    </button>
+  </nav>
+
+  <!-- ── Hero ── -->
+  <section class="lp-hero">
+    <div class="lp-hero-type">
+      <h1 class="lp-line lp-line-a">The only thing<br>that matters</h1>
+      <div class="lp-line lp-line-b">is how<br>they feel</div>
+    </div>
+    <div class="lp-stats">
+      <span>Grounded in vet guidelines</span>
+      <span>Remembers every conversation</span>
+      <span>Finds real vets near you</span>
+    </div>
+  </section>
+
+  <!-- ── Login ── -->
+  <section class="lp-login" id="login">
+    <div class="lp-login-inner">
+      <div class="lp-login-content">
+        <div class="lp-eyebrow">Prim Pets — Private beta</div>
+        <h2 class="lp-login-title">Welcome<br>back</h2>
+        <p class="lp-login-sub">Log in to continue with answers shaped around your dog's profile, history, and routine care.</p>
+
+        <div class="lp-form-card">
+          <% if (error) { %>
+            <div class="lp-alert"><%= error %></div>
+          <% } %>
+
+          <form method="POST" action="/login" class="auth-form">
+            <div class="lp-field">
+              <label for="email">Your email</label>
+              <input type="email" id="email" name="email" required
+                     placeholder="you@example.com" autocomplete="email">
             </div>
-          </li>
-          <li class="step">
-            <span class="step-num">2</span>
-            <div>
-              <div class="step-title">Set up your dog's profile</div>
-              <div class="step-desc">Breed, age, diet and history</div>
+            <div class="lp-field">
+              <label for="access_code">Access code<span class="lp-hint">sent by the Prim Pets team</span></label>
+              <input type="text" id="access_code" name="access_code" required
+                     placeholder="e.g. K8M2XP" autocomplete="off"
+                     style="letter-spacing: 0.15em; text-transform: uppercase;">
             </div>
-          </li>
-          <li class="step">
-            <span class="step-num">3</span>
-            <div>
-              <div class="step-title">Start asking Whoof AI</div>
-              <div class="step-desc">Symptoms, diet, vaccinations and more</div>
-            </div>
-          </li>
-        </ol>
-      </div>
-    </aside>
-
-    <main class="auth-main">
-      <div class="auth-form-wrap">
-        <div class="auth-brand">
-          <img class="brand-mark brand-mark-sm" src="/whoof-icon.png" alt="">
-          <span class="brand-gradient-text">Whoof</span>
-        </div>
-        <h2>Log in to Whoof</h2>
-        <p class="auth-sub">Enter the email and access code from your invite.</p>
-
-        <% if (error) { %>
-          <div class="alert alert-error"><%= error %></div>
-        <% } %>
-
-        <form method="POST" action="/login" class="auth-form">
-          <div class="field">
-            <label for="email">Your email</label>
-            <input type="email" id="email" name="email" required
-                   placeholder="you@example.com" autocomplete="email">
-          </div>
-          <div class="field">
-            <label for="access_code">Access code
-              <span class="label-hint">sent to you by the Whoof team</span>
+            <label class="lp-remember">
+              <input type="checkbox" id="remember_me">
+              <span>Remember me</span>
             </label>
-            <input type="text" id="access_code" name="access_code" required
-                   placeholder="e.g. K8M2XP" autocomplete="off"
-                   style="letter-spacing: 0.15em; text-transform: uppercase;">
-          </div>
-          <label class="remember-row">
-            <input type="checkbox" id="remember_me" class="remember-checkbox">
-            <span class="remember-label">Remember me</span>
-          </label>
 
-          <button type="submit" class="btn btn-primary btn-full btn-lg">Log in</button>
-        </form>
+            <button type="submit" class="lp-submit">Log in</button>
+          </form>
+        </div>
 
-        <p class="auth-help">
-          Don't have a code? Contact John to be added as a tester.
-        </p>
+        <p class="lp-help">Don't have a code? Contact John to be added as a tester.</p>
       </div>
-    </main>
-  </div>
+    </div>
+  </section>
 
 <script>
 (function () {
+  // Nav → smooth-scroll to the login section.
+  document.getElementById('lp-login-btn').addEventListener('click', function () {
+    document.getElementById('login').scrollIntoView({ behavior: 'smooth' });
+  });
+
+  // Failed login: land the user on the form (with the error visible), not the hero.
+  <% if (error) { %>
+  document.getElementById('login').scrollIntoView({ behavior: 'instant', block: 'start' });
+  <% } %>
+
+  // Subtle opposing horizontal drift on the two headline blocks as you scroll —
+  // the TinyWins-style slide, kept gentle. Skipped for reduced-motion users.
+  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    var lineA = document.querySelector('.lp-line-a');
+    var lineB = document.querySelector('.lp-line-b');
+    var ticking = false;
+    window.addEventListener('scroll', function () {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(function () {
+        var y = window.scrollY;
+        lineA.style.transform = 'translateX(' + (-y * 0.22) + 'px)';
+        lineB.style.transform = 'translateX(' + (y * 0.22) + 'px)';
+        ticking = false;
+      });
+    }, { passive: true });
+  }
+
+  // Remember-me (unchanged behaviour): restore on load, save/clear on submit.
   var emailEl = document.getElementById('email');
   var codeEl  = document.getElementById('access_code');
   var remEl   = document.getElementById('remember_me');
   var form    = document.querySelector('.auth-form');
 
-  // Restore saved credentials on load
   var saved = null;
   try { saved = JSON.parse(localStorage.getItem('whoof_remember') || 'null'); } catch (e) {}
   if (saved && saved.email) {
@@ -107,7 +326,6 @@
     remEl.checked = true;
   }
 
-  // Save or clear on submit
   form.addEventListener('submit', function () {
     if (remEl.checked) {
       localStorage.setItem('whoof_remember', JSON.stringify({

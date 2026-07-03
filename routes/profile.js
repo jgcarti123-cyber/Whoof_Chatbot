@@ -175,7 +175,9 @@ router.post('/onboarding', requireAuth, async (req, res) => {
       );
     }
 
-    res.redirect('/onboarding?saved=1');
+    // The submit button says "Save & go to chat" — land the owner in the chat,
+    // not back on the form (the old ?saved=1 round-trip read as "nothing happened").
+    res.redirect('/chat');
   } catch (err) {
     console.error('Profile save error:', err);
     res.render('onboarding', { pet: b, breeds: [], ownerName: b.owner_name || '', error: 'Could not save profile. Please try again.', saved: false });
