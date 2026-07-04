@@ -13,15 +13,6 @@
     .adm-brand  { display: flex; align-items: center; gap: .55rem; font-weight: 700; font-size: 1rem; }
     .adm-actions { display: flex; align-items: center; gap: .65rem; }
 
-    .tester-tabs { display: flex; gap: .4rem; margin-bottom: 1.75rem; flex-wrap: wrap; }
-    .tester-tab {
-      padding: .38rem .85rem; border-radius: 999px; font-size: .82rem; font-weight: 600;
-      border: 1.5px solid var(--border); background: var(--surface); color: var(--text-muted);
-      text-decoration: none; transition: all .14s;
-    }
-    .tester-tab:hover { color: var(--text); border-color: hsl(var(--c-brand)/.4); }
-    .tester-tab.active { background: var(--primary-light); border-color: hsl(var(--c-brand)/.55); color: var(--primary); }
-
     .stats { display: flex; gap: .75rem; margin-bottom: 1.75rem; flex-wrap: wrap; }
     .stat-pill {
       padding: .45rem 1rem; border-radius: 999px; font-size: .82rem; font-weight: 600;
@@ -81,6 +72,29 @@
       background: hsl(var(--c-danger)/.15); color: hsl(var(--c-danger));
       border: 1px solid hsl(var(--c-danger)/.3); margin-left: auto; flex-shrink: 0;
     }
+
+    /* Users panel — every user + their code, and the switcher for the chat viewer below */
+    .users { margin-bottom: 2rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
+    .users-head { display: flex; align-items: center; gap: .6rem; padding: .85rem 1rem; border-bottom: 1px solid var(--border); }
+    .users-title { font-weight: 700; font-size: .95rem; }
+    .users-count { font-size: .72rem; font-weight: 700; padding: .15rem .55rem; border-radius: 999px; background: var(--surface-2); color: var(--text-muted); }
+    .users-hint { margin-left: auto; font-size: .74rem; color: var(--text-muted); }
+    .user-row {
+      display: grid; grid-template-columns: 1.5fr .9fr .8fr auto auto auto;
+      gap: .85rem; align-items: center; padding: .65rem 1rem;
+      border-top: 1px solid var(--border); font-size: .85rem;
+      text-decoration: none; color: inherit; transition: background .12s;
+    }
+    .user-row:hover { background: var(--surface-2); }
+    .user-row.selected { background: var(--primary-light); }
+    .user-email { font-weight: 600; color: var(--text); word-break: break-all; }
+    .user-meta { color: var(--text-muted); }
+    .user-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 700; letter-spacing: .14em; background: var(--surface-2); padding: .28rem .6rem; border-radius: 6px; color: var(--text); justify-self: start; white-space: nowrap; }
+    .user-badge { font-size: .68rem; font-weight: 700; padding: .18rem .55rem; border-radius: 999px; white-space: nowrap; }
+    .user-badge.pending { background: hsl(var(--c-warning)/.18); color: hsl(var(--c-warning)); }
+    .user-badge.onboarded { background: hsl(var(--c-success)/.18); color: hsl(var(--c-success)); }
+    .user-view { font-size: .78rem; font-weight: 700; color: var(--primary); white-space: nowrap; }
+    .users-empty { padding: 1.25rem 1rem; color: var(--text-muted); font-size: .88rem; }
   </style>
 </head>
 <body style="background:var(--bg);color:var(--text);min-height:100vh">
@@ -99,16 +113,36 @@
       </div>
     </div>
 
-    <!-- Tester switcher -->
-    <div class="tester-tabs">
-      <% testers.forEach(function(t) { %>
-        <a href="/admin?tester=<%= encodeURIComponent(t) %>"
-           class="tester-tab <%= t === selected ? 'active' : '' %>">
-          <%= t %>
-        </a>
-      <% }) %>
+    <!-- Users: every account + their access code. Click a row to view that user's chats
+         below (also doubles as the self-serve signup relay list — share the code shown,
+         then the user logs in with their email + that code). -->
+    <div class="users">
+      <div class="users-head">
+        <span class="users-title">Users</span>
+        <span class="users-count"><%= users.length %> total</span>
+        <span class="users-hint">Click a row to view chats · share the code so they can log in.</span>
+      </div>
+      <% if (!users.length) { %>
+        <div class="users-empty">No users yet.</div>
+      <% } else { %>
+        <% users.forEach(function(u) {
+             var d = new Date(u.created_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+             var isPending = !u.onboarded && !u.signup_activated;
+        %>
+          <a href="/admin?tester=<%= encodeURIComponent(u.email) %>"
+             class="user-row <%= u.email === selected ? 'selected' : '' %>">
+            <span class="user-email"><%= u.email %></span>
+            <span class="user-meta"><%= u.owner_name || '—' %><% if (u.dog_name) { %> · 🐾 <%= u.dog_name %><% } %></span>
+            <span class="user-meta"><%= d %></span>
+            <span class="user-code"><%= u.access_code || '—' %></span>
+            <span class="user-badge <%= u.onboarded ? 'onboarded' : 'pending' %>"><%= u.onboarded ? 'Onboarded' : 'Awaiting login' %></span>
+            <span class="user-view"><%= u.email === selected ? 'Viewing ↓' : 'View chats' %></span>
+          </a>
+        <% }) %>
+      <% } %>
     </div>
 
+    <% if (selected) { %>
     <!-- Stats -->
     <div class="stats">
       <div class="stat-pill"><span><%= turns.length %></span>turns</div>
@@ -165,6 +199,7 @@
           </div>
         <% }) %>
       </div>
+    <% } %>
     <% } %>
 
   </div>

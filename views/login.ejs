@@ -198,6 +198,37 @@
     .lp-submit:active { transform: translateY(0); }
 
     .lp-help { margin-top: 18px; font-size: .8rem; font-weight: 500; color: rgba(255,255,255,.45); }
+    .lp-help a { color: rgba(255,255,255,.82); font-weight: 700; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+    .lp-help a:hover { color: #fff; }
+
+    /* Login / Request-access toggle */
+    .lp-tabs {
+      display: flex; gap: 5px; margin-bottom: 22px;
+      background: rgba(255,255,255,.06); border-radius: 12px; padding: 5px;
+    }
+    .lp-tab {
+      flex: 1; text-align: center; padding: 9px 10px;
+      border: 0; border-radius: 8px; background: transparent;
+      color: rgba(255,255,255,.55);
+      font-family: inherit; font-weight: 700; font-size: .78rem; letter-spacing: .02em;
+      cursor: pointer; transition: background .2s, color .2s;
+    }
+    .lp-tab.active { background: #F6F1E7; color: #14100A; }
+
+    /* Success banner (signup received) */
+    .lp-success {
+      background: rgba(58, 140, 84, .30);
+      border: 1px solid rgba(120, 216, 150, .5);
+      color: #DEF6E6;
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-size: .85rem; font-weight: 600; line-height: 1.5;
+      margin-bottom: 20px;
+    }
+
+    /* Mode panes (login form / signup form / their subs + help lines) */
+    [data-for] { display: none; }
+    [data-for].active { display: block; }
 
     /* ── Responsive ── */
     @media (max-width: 720px) {
@@ -243,41 +274,86 @@
     </div>
   </section>
 
-  <!-- ── Login ── -->
+  <!-- ── Login / Request access ── -->
+  <% var mode = (locals.mode === 'signup') ? 'signup' : 'login'; %>
+  <% var v = locals.values || {}; %>
   <section class="lp-login" id="login">
     <div class="lp-login-inner">
       <div class="lp-login-content">
         <div class="lp-eyebrow">Prim Pets — Private beta</div>
-        <h2 class="lp-login-title">Welcome<br>back</h2>
-        <p class="lp-login-sub">Log in to continue with answers shaped around your dog's profile, history, and routine care.</p>
+        <h2 class="lp-login-title">Hello,<br>meet&nbsp;Prim</h2>
+        <p class="lp-login-sub lp-sub <%= mode === 'login' ? 'active' : '' %>" data-for="login">Your dog's own concierge — pick up right where you left off, with answers shaped around their profile, history, and care.</p>
+        <p class="lp-login-sub lp-sub <%= mode === 'signup' ? 'active' : '' %>" data-for="signup">Give your dog a concierge that knows them inside out. Tell us who you are and we'll get you set up with access.</p>
 
         <div class="lp-form-card">
-          <% if (error) { %>
-            <div class="lp-alert"><%= error %></div>
+          <div class="lp-tabs" role="tablist">
+            <button type="button" class="lp-tab <%= mode === 'login' ? 'active' : '' %>" data-tab="login">Log in</button>
+            <button type="button" class="lp-tab <%= mode === 'signup' ? 'active' : '' %>" data-tab="signup">Request access</button>
+          </div>
+
+          <% if (locals.signupSuccess) { %>
+            <div class="lp-success"><%= signupSuccess %></div>
           <% } %>
 
-          <form method="POST" action="/login" class="auth-form">
-            <div class="lp-field">
-              <label for="email">Your email</label>
-              <input type="email" id="email" name="email" required
-                     placeholder="you@example.com" autocomplete="email">
-            </div>
-            <div class="lp-field">
-              <label for="access_code">Access code<span class="lp-hint">sent by the Prim Pets team</span></label>
-              <input type="text" id="access_code" name="access_code" required
-                     placeholder="e.g. K8M2XP" autocomplete="off"
-                     style="letter-spacing: 0.15em; text-transform: uppercase;">
-            </div>
-            <label class="lp-remember">
-              <input type="checkbox" id="remember_me">
-              <span>Remember me</span>
-            </label>
+          <!-- Login pane -->
+          <div class="lp-pane <%= mode === 'login' ? 'active' : '' %>" data-for="login">
+            <% if (error) { %>
+              <div class="lp-alert"><%= error %></div>
+            <% } %>
+            <form method="POST" action="/login" class="auth-form">
+              <div class="lp-field">
+                <label for="email">Your email</label>
+                <input type="email" id="email" name="email" required
+                       value="<%= v.email || '' %>"
+                       placeholder="you@example.com" autocomplete="email">
+              </div>
+              <div class="lp-field">
+                <label for="access_code">Access code<span class="lp-hint">sent by the Prim Pets team</span></label>
+                <input type="text" id="access_code" name="access_code" required
+                       placeholder="e.g. K8M2XP" autocomplete="off"
+                       style="letter-spacing: 0.15em; text-transform: uppercase;">
+              </div>
+              <label class="lp-remember">
+                <input type="checkbox" id="remember_me">
+                <span>Remember me</span>
+              </label>
 
-            <button type="submit" class="lp-submit">Log in</button>
-          </form>
+              <button type="submit" class="lp-submit">Log in</button>
+            </form>
+          </div>
+
+          <!-- Signup pane -->
+          <div class="lp-pane <%= mode === 'signup' ? 'active' : '' %>" data-for="signup">
+            <% if (locals.signupError) { %>
+              <div class="lp-alert"><%= signupError %></div>
+            <% } %>
+            <form method="POST" action="/signup" class="signup-form">
+              <div class="lp-field">
+                <label for="su_email">Your email</label>
+                <input type="email" id="su_email" name="email" required
+                       value="<%= v.email || '' %>"
+                       placeholder="you@example.com" autocomplete="email">
+              </div>
+              <div class="lp-field">
+                <label for="su_name">Your name</label>
+                <input type="text" id="su_name" name="name" required
+                       value="<%= v.name || '' %>"
+                       placeholder="e.g. Priya" autocomplete="name">
+              </div>
+              <div class="lp-field">
+                <label for="su_dog">Your dog's name</label>
+                <input type="text" id="su_dog" name="dog_name" required
+                       value="<%= v.dog_name || '' %>"
+                       placeholder="e.g. Bruno" autocomplete="off">
+              </div>
+
+              <button type="submit" class="lp-submit">Request access</button>
+            </form>
+          </div>
         </div>
 
-        <p class="lp-help">Don't have a code? Contact John to be added as a tester.</p>
+        <p class="lp-help lp-help-line <%= mode === 'login' ? 'active' : '' %>" data-for="login">First time here? <a data-goto="signup">Request access</a> and we'll send your code.</p>
+        <p class="lp-help lp-help-line <%= mode === 'signup' ? 'active' : '' %>" data-for="signup">Already have a code? <a data-goto="login">Log in</a> instead.</p>
       </div>
     </div>
   </section>
@@ -289,8 +365,31 @@
     document.getElementById('login').scrollIntoView({ behavior: 'smooth' });
   });
 
-  // Failed login: land the user on the form (with the error visible), not the hero.
-  <% if (error) { %>
+  // ── Login / Request-access toggle ──────────────────────────────────────────
+  // Swap the visible pane, its sub-copy, and its help line by flipping the shared
+  // `active` class on every element tagged with the matching data-for.
+  function setMode(mode) {
+    document.querySelectorAll('.lp-tab').forEach(function (t) {
+      t.classList.toggle('active', t.getAttribute('data-tab') === mode);
+    });
+    document.querySelectorAll('[data-for]').forEach(function (el) {
+      el.classList.toggle('active', el.getAttribute('data-for') === mode);
+    });
+  }
+  document.querySelectorAll('.lp-tab').forEach(function (tab) {
+    tab.addEventListener('click', function () { setMode(tab.getAttribute('data-tab')); });
+  });
+  // In-copy "Request access" / "Log in" links flip the mode too.
+  document.querySelectorAll('[data-goto]').forEach(function (link) {
+    link.addEventListener('click', function (e) {
+      e.preventDefault();
+      setMode(link.getAttribute('data-goto'));
+    });
+  });
+
+  // A submitted form (error OR signup-received) should land the user on the card with the
+  // banner visible, not up at the hero.
+  <% if (error || locals.signupError || locals.signupSuccess) { %>
   document.getElementById('login').scrollIntoView({ behavior: 'instant', block: 'start' });
   <% } %>
 

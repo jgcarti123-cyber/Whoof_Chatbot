@@ -59,16 +59,31 @@ router.post('/admin/logout', (req, res) => {
 
 // GET /admin — main dashboard
 router.get('/admin', requireAdmin, async (req, res) => {
-  // All real testers (exclude seeded demo/example accounts)
-  const testers = [
-    'rushiljohn10@gmail.com',
-    'tester123@gmail.com',
-  ];
+  // Every real user (email + access code + onboarding state), for the unified
+  // users/codes panel AND as the source of truth for who can be selected in the chat
+  // viewer below — excludes the seeded demo/dev-login account, which isn't a real tester.
+  const usersRes = await query(
+    `SELECT
+       o.id, o.email, o.owner_name, o.access_code, o.created_at,
+       COALESCE(p.name, sr.dog_name) AS dog_name,
+       (p.id IS NOT NULL) AS onboarded,
+       sr.activated AS signup_activated
+     FROM owners o
+     LEFT JOIN pet_profile p ON p.owner_id = o.id
+     LEFT JOIN signup_requests sr ON sr.owner_id = o.id
+     WHERE o.email <> 'demo.owner@whoof.example'
+     ORDER BY o.created_at DESC`,
+  );
+  const users = usersRes.rows;
 
-  // Filter: which tester is selected (default first)
-  const selected = testers.includes(req.query.tester) ? req.query.tester : testers[0];
+  // Which user's chats are showing (default: most recently created). ?tester= must match
+  // a real user's email or it's ignored — anything else falls back to the default so the
+  // page never renders with an empty/undefined selection.
+  const selected = users.some(u => u.email === req.query.tester)
+    ? req.query.tester
+    : (users[0]?.email || null);
 
-  const rows = await query(
+  const rows = selected ? await query(
     `SELECT
        cm.id,
        cm.created_at,
@@ -89,7 +104,7 @@ router.get('/admin', requireAdmin, async (req, res) => {
      WHERE o.email = $1
      ORDER BY cm.created_at DESC`,
     [selected],
-  );
+  ) : { rows: [] };
 
   const turns = rows.rows;
 
@@ -100,7 +115,9 @@ router.get('/admin', requireAdmin, async (req, res) => {
     : null;
   const lowCount = rated.filter(t => t.rating <= 4).length;
 
-  res.render('admin', { testers, selected, turns, avgRating, lowCount, rated: rated.length });
+  res.render('admin', {
+    users, selected, turns, avgRating, lowCount, rated: rated.length,
+  });
 });
 
 module.exports = router;

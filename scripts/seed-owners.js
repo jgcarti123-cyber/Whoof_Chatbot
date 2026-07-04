@@ -39,11 +39,13 @@ async function seedOwners() {
       const hash = await bcrypt.hash(code, 10);
 
       // Upsert: if the owner already exists, update the hash (regenerates their code).
+      // access_code stores the PLAINTEXT alongside the hash so it shows up in the admin
+      // dashboard's user/code list too, not just for self-serve signups.
       await client.query(
-        `INSERT INTO owners (email, access_code_hash)
-         VALUES ($1, $2)
-         ON CONFLICT (email) DO UPDATE SET access_code_hash = EXCLUDED.access_code_hash`,
-        [owner.email.toLowerCase().trim(), hash],
+        `INSERT INTO owners (email, access_code_hash, access_code)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (email) DO UPDATE SET access_code_hash = EXCLUDED.access_code_hash, access_code = EXCLUDED.access_code`,
+        [owner.email.toLowerCase().trim(), hash, code],
       );
 
       results.push({ email: owner.email, code });
