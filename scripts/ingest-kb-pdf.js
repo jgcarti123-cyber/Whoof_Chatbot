@@ -6,18 +6,21 @@
  * Flow:
  *   1. Hash PDF → skip if unchanged (idempotent)
  *   2. Run scripts/parse_pdf.py → structured JSON with chunks + image paths
- *   3. For each figure chunk: call Claude haiku vision to describe the image
- *   4. Embed all chunks with Voyage AI voyage-3 (batched, heading path prepended)
- *   5. Delete existing kb_chunks rows for this source_title
- *   6. Insert all chunks with full structural metadata
- *   7. Save file hash, print ingest report
+ *   3. Embed all chunks with the shared embedding model (batched, heading path prepended)
+ *   4. Delete existing kb_chunks rows for this source_title
+ *   5. Insert all chunks with full structural metadata
+ *   6. Save file hash, print ingest report
+ *
+ * Figure chunks keep whatever caption text parse_pdf.py extracted from the PDF layout
+ * (or a placeholder if none was found) — there's no model-generated visual description
+ * step. It added Groq vision-model API calls (cost + the on-demand tier's TPM rate
+ * limit) for accuracy gains that didn't justify it for this KB.
  *
  * Usage:
- *   node scripts/ingest-kb-pdf.js <pdf_path> [--force] [--no-vision] [--dry-run]
+ *   node scripts/ingest-kb-pdf.js <pdf_path> [--force] [--dry-run]
  *
  * Flags:
  *   --force      Re-ingest even if PDF hash hasn't changed
- *   --no-vision  Skip Claude vision calls (use caption text only for figures)
  *   --dry-run    Parse + report without writing to DB
  */
 
@@ -27,7 +30,6 @@ const fs      = require('fs');
 const path    = require('path');
 const crypto  = require('crypto');
 const { execSync, spawnSync } = require('child_process');
-const provider = require('../lib/llmProvider');
 const embeddings = require('../lib/embeddings');
 const { pool }  = require('../db');
 
@@ -35,7 +37,6 @@ const { pool }  = require('../db');
 const args = process.argv.slice(2);
 const pdfPath  = args.find(a => !a.startsWith('--'));
 const FORCE    = args.includes('--force');
-const NO_VISION= args.includes('--no-vision');
 const DRY_RUN  = args.includes('--dry-run');
 
 // --title "Custom Citation Title" overrides the auto-derived source_title.
@@ -46,14 +47,12 @@ function flagValue(name) {
 const TITLE_OVERRIDE = flagValue('--title');
 
 if (!pdfPath) {
-  console.error('Usage: node scripts/ingest-kb-pdf.js <pdf_path> [--force] [--no-vision] [--dry-run] [--title "Citation Title"]');
+  console.error('Usage: node scripts/ingest-kb-pdf.js <pdf_path> [--force] [--dry-run] [--title "Citation Title"]');
   process.exit(1);
 }
 
 const HASH_FILE    = path.join(__dirname, '.pdf-hashes.json');
 const EMBED_BATCH  = 16;         // chunks embedded per call (local model, CPU)
-
-const VISION_PROMPT = 'This image is from a veterinary clinical guideline document. In 2-3 specific sentences, describe what is clinically depicted: the anatomical structure, pathology, procedure, or finding shown, and its diagnostic significance. Be precise and clinical. If the image is too low-resolution or non-clinical (e.g. a logo or diagram only), say so.';
 
 // ── Hash tracking ─────────────────────────────────────────────────────────────
 function loadHashes() {
@@ -112,11 +111,6 @@ async function runPythonParser(pdfAbsPath, pythonCmd) {
   const parsed = JSON.parse(fs.readFileSync(tmpOutput, 'utf8'));
   fs.unlinkSync(tmpOutput);
   return parsed;
-}
-
-// ── Vision (provider-aware: Groq vision model or Claude) ────────────────────────
-async function describeImage(imagePath) {
-  return provider.describeImage({ imagePath, prompt: VISION_PROMPT, maxTokens: 300 });
 }
 
 // ── Embedding (shared module: local open-source model or Voyage) ───────────────
@@ -189,30 +183,8 @@ async function main() {
   const figureChunks = chunks.filter(c => c.chunk_type === 'figure' && c.image_path);
   console.log(`Figure chunks with images: ${figureChunks.length}`);
 
-  if (!NO_VISION && figureChunks.length > 0) {
-    if (!provider.isConfigured()) {
-      console.warn(`  ${provider.PROVIDER === 'groq' ? 'GROQ_API_KEY' : 'ANTHROPIC_API_KEY'} not set — skipping vision descriptions (use --no-vision to suppress this warning).`);
-    } else {
-      console.log(`  Generating vision descriptions via ${provider.PROVIDER} (${provider.PROVIDER === 'groq' ? provider.GROQ_VISION_MODEL : 'claude'})...`);
-      let visionOk = 0, visionFail = 0;
-      for (const chunk of figureChunks) {
-        try {
-          const description = await describeImage(chunk.image_path);
-          const isLowConf = /low.resolution|logo|diagram only|cannot describe/i.test(description);
-          chunk.content += `\n\nVisual description: ${description}`;
-          if (isLowConf) {
-            console.log(`    ⚠ Flagged for review: ${chunk.figure_id} (p${chunk.page_number}) — ${description.slice(0, 80)}…`);
-          }
-          visionOk++;
-        } catch (err) {
-          console.warn(`    ✗ Vision failed for ${chunk.figure_id} (p${chunk.page_number}): ${err.message}`);
-          visionFail++;
-        }
-      }
-      console.log(`  Vision complete: ${visionOk} ok, ${visionFail} failed`);
-    }
-  } else if (NO_VISION) {
-    console.log('  --no-vision: skipping Claude vision calls, using captions only.');
+  if (figureChunks.length > 0) {
+    console.log(`  Using caption text only for ${figureChunks.length} figure chunk(s) — no vision-model description step.`);
   }
 
   if (DRY_RUN) {

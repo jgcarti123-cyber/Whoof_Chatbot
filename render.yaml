@@ -4,9 +4,14 @@
 ## provisions both resources in one go. Full walkthrough: see DEPLOY.md.
 ##
 ## Free-tier notes:
-## - The web service spins down after 15 min idle and cold-starts on the next
-##   request (~30-60s, since @xenova/transformers downloads/loads the local
-##   embedding model on boot). Acceptable for testers, not for a always-on launch.
+## - The web service spins down after 15 min idle and cold-starts on the next request.
+## - Embeddings run on Voyage AI (EMBEDDING_PROVIDER=voyage), not the local in-process
+##   model — the free web service's 512MB RAM cap can't hold the local ONNX model
+##   alongside Node/Express/the Postgres pool without getting OOM-killed. See migration
+##   1700000000023_embedding-dim-1024-voyage.js. Voyage's free tier (3 RPM/10K TPM, no
+##   card needed) is enough for a handful of testers; a real launch may need to upgrade
+##   it. Requires VOYAGE_API_KEY below, and the KB must be ingested with
+##   EMBEDDING_PROVIDER=voyage (ingestion and retrieval must share one embedding space).
 ## - The free Postgres instance expires after 90 days. Render emails a warning;
 ##   you upgrade or spin up a fresh one (this app has no un-exportable state
 ##   beyond kb_chunks, which just needs a re-ingest — see scripts/ingest-all-pdfs.sh).
@@ -48,11 +53,12 @@ services:
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: EMBEDDING_PROVIDER
-        value: local
-      - key: EMBEDDING_MODEL
-        value: Xenova/bge-base-en-v1.5
+        value: voyage
       - key: ENABLE_RERANK
         value: false
+      # Required — the app has no local-embedding fallback in this config; a missing
+      # key means every retrieval call fails (fails open to the web-search path per
+      # lib/rag.js, but the KB itself becomes unreachable).
       - key: VOYAGE_API_KEY
         sync: false
       - key: GOOGLE_PLACES_API_KEY

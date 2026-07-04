@@ -14,10 +14,8 @@ const { pool } = require('../db');
 
 // ─── Edit these before running ────────────────────────────────────────────────
 const OWNERS = [
-  { email: 'tester1@example.com' },
-  { email: 'tester2@example.com' },
-  { email: 'tester3@example.com' },
-  { email: 'tester4@example.com' },
+  { email: 'rushiljohn10@gmail.com' },
+  { email: 'tester123@gmail.com' },
 ];
 // ─────────────────────────────────────────────────────────────────────────────
 

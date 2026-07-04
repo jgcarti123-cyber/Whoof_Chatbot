@@ -27,9 +27,13 @@ under the `prim-pets` service → **Environment**:
 - `ADMIN_SECRET` — password for `/admin` (tester feedback dashboard).
 - `GROQ_API_KEY` (if `LLM_PROVIDER=groq`, the default) — free key at
   https://console.groq.com/keys.
+- `VOYAGE_API_KEY` — **required.** Embeddings run on Voyage AI, not the local
+  in-process model — Render's free web service caps at 512MB RAM, and loading
+  the local ONNX model there gets the process OOM-killed mid-request (see the
+  note in `render.yaml`). Free tier: 3 RPM / 10K TPM, no card needed —
+  https://dash.voyageai.com/.
 - `GOOGLE_PLACES_API_KEY` — for Find nearby (vets/parks/cafés).
 - `TAVILY_API_KEY` — optional, web-search fallback. Free tier, no card.
-- `VOYAGE_API_KEY` — only needed if you turn on `ENABLE_RERANK`.
 
 `SESSION_SECRET` and `DATABASE_URL` are auto-generated/auto-wired by the
 blueprint — don't set those manually.
@@ -46,19 +50,23 @@ it, run the ingest script locally, pointed at the Render database, once:
 # (prim-pets-db → Info → "External Database URL" — the internal one only
 # works from inside Render's network, not your laptop).
 export DATABASE_URL="postgres://...render-external-url.../prim_pets_db"
+# Must match the deployed EMBEDDING_PROVIDER (voyage) — ingestion and retrieval
+# have to share one embedding space, or similarity search returns garbage.
+export EMBEDDING_PROVIDER=voyage
+export VOYAGE_API_KEY="<same key you set in the Render dashboard>"
 bash scripts/ingest-all-pdfs.sh
 ```
 
-This reuses the same `lib/embeddings.js` path as local dev, so retrieval stays
-consistent with whatever you tested locally. Re-run it any time you add a PDF
-to `kb-source/`.
+If you ever re-ingest locally for dev work, unset `EMBEDDING_PROVIDER` (or set
+it back to `local`) — local dev keeps using the free in-process model by
+default, since a laptop has plenty of RAM to spare. Re-run the Render-pointed
+ingest above any time you add a PDF to `kb-source/`.
 
 ## 5. First load will be slow — that's expected
 
-`@xenova/transformers` downloads and caches the local embedding model
-(`Xenova/bge-base-en-v1.5`) on first use. Combined with the free tier's
-cold-start after 15 minutes idle, the very first request after a spin-down can
-take 30–60s. Subsequent requests within the same "awake" window are fast.
+The free tier spins the service down after 15 minutes idle; the first request
+after that has to cold-boot the whole process. Subsequent requests within the
+same "awake" window are fast.
 
 ## 6. Verify
 

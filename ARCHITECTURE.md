@@ -143,7 +143,7 @@ lib/
   exportExcel.js        Writes whoof-responses.xlsx for the tracked tester account (§17)
 scripts/
   ingest-all-pdfs.sh   Batch-ingest every PDF in kb-source/
-  ingest-kb-pdf.js     One PDF → parse → vision → embed → kb_chunks
+  ingest-kb-pdf.js     One PDF → parse → embed → kb_chunks
   parse_pdf.py         PDF → structured JSON (chunks + extracted figures)
   generate-commit-log.js  Regenerates whoof-commit-log.xlsx from `git log` (post-commit hook)
   install-git-hooks.sh   Installs that post-commit hook
@@ -200,20 +200,24 @@ the single switch point: set `LLM_PROVIDER=groq` for Groq's open models, or leav
 > the local model (Groq has no embeddings API). So the app can run on Groq for text while
 > embeddings run locally. That split is by design.
 
-There are **three model tiers** (each overridable by env):
+There are **two model tiers** (each overridable by env):
 
 | Tier | Groq default | Anthropic default | Used for |
 |---|---|---|---|
 | main | `llama-3.3-70b-versatile` | `claude-sonnet-4-6` | the actual vet answer |
 | fast | `llama-3.1-8b-instant` | `claude-haiku-4-5` | triage, query rewrite, titles, summaries, place/booking-intent detection, vet-visit briefings |
-| vision | `llama-4-scout-17b` | `claude-haiku` | figure descriptions during ingestion |
 
-The provider exposes **four primitives** — learn these and you understand every model call:
+Ingestion has no vision-model step — figure chunks use whatever caption text
+`parse_pdf.py` extracts from the PDF layout (or a placeholder if none was found). A
+vision-caption primitive existed here previously but was removed: it didn't improve
+answer accuracy enough for this KB to justify the added Groq API cost and rate-limit
+exposure (see the ingest script's history if you need to reintroduce it).
+
+The provider exposes **three primitives** — learn these and you understand every model call:
 
 1. `generate({ system, user, maxTokens, fast })` → plain text. (chat answers, query rewrite, titles, summaries, booking-message drafts)
 2. `generateStructured({ system, user, tool, fast })` → forces **one** tool and returns its parsed args. (triage classifier, decision detector, place/booking-intent detectors, community-mentions extractor, vet-visit summariser)
 3. `generateRouted({ system, user, tools, force })` → offers several tools and lets the model pick one (or forces one with `force`). (text-vs-card routing)
-4. `describeImage({ imagePath, prompt })` → vision caption. (ingestion)
 
 Each primitive maps the same call onto the Anthropic Messages API **or** the Groq
 OpenAI-compatible `chat/completions` API. `isConfigured()` reports whether the active
@@ -246,12 +250,8 @@ PDF file
 parse_pdf.py  (Python: PyMuPDF + pdfplumber)
   │  splits the document into CHUNKS with structural metadata:
   │  section / subsection / page_number / chunk_type (body | figure | table)
-  │  and extracts figure images to disk.
-  ▼
-Vision pass  (for chunk_type === 'figure')
-  │  each figure image → provider.describeImage() → a clinical caption,
-  │  appended to the chunk's text as "Visual description: …".
-  │  Low-confidence ones (logos/diagrams) are flagged for review.
+  │  and extracts figure images to disk. Figure chunks keep whatever caption text
+  │  was found in the PDF layout (or a placeholder) — no vision-model step.
   ▼
 Embedding  (lib/embeddings.js → embedDocuments)
   │  every chunk's "heading_path: content" string → a 768-dim vector.
@@ -975,9 +975,9 @@ All in `.env` (gitignored). The ones that matter:
 | `NODE_ENV` | — | `production` turns on secure cookies + trust-proxy, and makes a missing `SESSION_SECRET`/`ADMIN_SECRET` a hard startup error |
 | `ADMIN_SECRET` | dev fallback (`whoof-admin`) | `/admin` dashboard password — **required** when `NODE_ENV=production` |
 | `ENABLE_DEV_LOGIN` | unset (off) | set `true` only in a trusted local `.env` to enable the passwordless `/dev-login` shortcut |
-| `LLM_PROVIDER` | `anthropic` | `groq` or `anthropic` — switches **all** text/vision calls |
+| `LLM_PROVIDER` | `anthropic` | `groq` or `anthropic` — switches **all** text calls |
 | `GROQ_API_KEY` | — | required if provider=groq |
-| `GROQ_MODEL` / `GROQ_FAST_MODEL` / `GROQ_VISION_MODEL` | llama-3.3-70b / llama-3.1-8b / llama-4-scout | per-tier overrides |
+| `GROQ_MODEL` / `GROQ_FAST_MODEL` | llama-3.3-70b / llama-3.1-8b | per-tier overrides |
 | `ANTHROPIC_API_KEY` | — | required if provider=anthropic |
 | `EMBEDDING_PROVIDER` | `local` | `local` (Transformers.js, no API) or `voyage` |
 | `EMBEDDING_MODEL` | `Xenova/bge-base-en-v1.5` | local model (768-dim) |

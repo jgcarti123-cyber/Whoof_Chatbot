@@ -6,13 +6,13 @@
 # re-running only processes new or modified PDFs.
 #
 # Usage:
-#   bash scripts/ingest-all-pdfs.sh                 # full ingest (embeddings + figure vision)
-#   bash scripts/ingest-all-pdfs.sh --no-vision     # skip Claude vision (faster, cheaper)
+#   bash scripts/ingest-all-pdfs.sh                 # full ingest
 #   bash scripts/ingest-all-pdfs.sh --dry-run       # parse + report only, no DB writes
 #   bash scripts/ingest-all-pdfs.sh --force         # re-ingest even if unchanged
 #
-# Requires VOYAGE_API_KEY (embeddings) and, unless --no-vision, ANTHROPIC_API_KEY
-# (figure descriptions) in .env.
+# Figure chunks use whatever caption text parse_pdf.py extracted from the PDF layout —
+# there's no vision-model description step (removed: not enough accuracy gain for this
+# KB to justify the added Groq API cost + rate-limit exposure).
 
 set -u
 cd "$(dirname "$0")/.." || exit 1
