@@ -35,6 +35,8 @@ function requireAdmin(req, res, next) {
   res.redirect('/admin/login');
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // GET /admin/login
 router.get('/admin/login', (req, res) => {
   if (req.session?.adminAuth) return res.redirect('/admin');
@@ -55,6 +57,25 @@ router.post('/admin/login', adminLoginLimiter, (req, res) => {
 router.post('/admin/logout', (req, res) => {
   req.session.adminAuth = false;
   req.session.save(() => res.redirect('/admin/login'));
+});
+
+// POST /admin/users/:id/delete — permanently remove a user and everything that cascades
+// from them (pet profile, chat sessions/turns, feedback, signup request). Irreversible —
+// the confirm() prompt lives client-side in admin.ejs; this route trusts the admin session
+// the same way every other /admin action does.
+// 20 attempts / 10 min / IP — generous (this is a legitimate bulk-cleanup action an admin
+// might do many of in a row), but still capped so a stolen admin session can't be used to
+// script through every row in one shot without at least slowing down.
+const deleteUserLimiter = makeLimiter({ windowMs: 10 * 60 * 1000, max: 20 });
+router.post('/admin/users/:id/delete', requireAdmin, deleteUserLimiter, async (req, res) => {
+  const id = req.params.id;
+  if (!UUID_RE.test(id)) return res.redirect('/admin');
+  try {
+    await query('DELETE FROM owners WHERE id = $1', [id]);
+  } catch (err) {
+    console.error('Admin delete user error:', err);
+  }
+  res.redirect('/admin');
 });
 
 // GET /admin — main dashboard

@@ -80,13 +80,17 @@
     .users-count { font-size: .72rem; font-weight: 700; padding: .15rem .55rem; border-radius: 999px; background: var(--surface-2); color: var(--text-muted); }
     .users-hint { margin-left: auto; font-size: .74rem; color: var(--text-muted); }
     .user-row {
-      display: grid; grid-template-columns: 1.5fr .9fr .8fr auto auto auto;
+      display: grid; grid-template-columns: 1.5fr .9fr .8fr auto auto auto auto;
       gap: .85rem; align-items: center; padding: .65rem 1rem;
       border-top: 1px solid var(--border); font-size: .85rem;
-      text-decoration: none; color: inherit; transition: background .12s;
+      transition: background .12s;
     }
     .user-row:hover { background: var(--surface-2); }
     .user-row.selected { background: var(--primary-light); }
+    /* display:contents makes the anchor invisible to the grid layout — its children
+       (email/meta/code/badge/view-text) lay out as direct grid items, same as before,
+       while the delete form stays a sibling instead of nesting inside the link. */
+    .user-row-link { display: contents; text-decoration: none; color: inherit; }
     .user-email { font-weight: 600; color: var(--text); word-break: break-all; }
     .user-meta { color: var(--text-muted); }
     .user-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 700; letter-spacing: .14em; background: var(--surface-2); padding: .28rem .6rem; border-radius: 6px; color: var(--text); justify-self: start; white-space: nowrap; }
@@ -94,6 +98,13 @@
     .user-badge.pending { background: hsl(var(--c-warning)/.18); color: hsl(var(--c-warning)); }
     .user-badge.onboarded { background: hsl(var(--c-success)/.18); color: hsl(var(--c-success)); }
     .user-view { font-size: .78rem; font-weight: 700; color: var(--primary); white-space: nowrap; }
+    .user-delete-form { margin: 0; }
+    .user-delete-btn {
+      font-size: .74rem; font-weight: 700; padding: .3rem .65rem; border-radius: 6px;
+      background: transparent; border: 1px solid hsl(var(--c-danger)/.4); color: hsl(var(--c-danger));
+      cursor: pointer; white-space: nowrap; transition: background .12s;
+    }
+    .user-delete-btn:hover { background: hsl(var(--c-danger)/.12); }
     .users-empty { padding: 1.25rem 1rem; color: var(--text-muted); font-size: .88rem; }
   </style>
 </head>
@@ -129,15 +140,19 @@
              var d = new Date(u.created_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
              var isPending = !u.onboarded && !u.signup_activated;
         %>
-          <a href="/admin?tester=<%= encodeURIComponent(u.email) %>"
-             class="user-row <%= u.email === selected ? 'selected' : '' %>">
-            <span class="user-email"><%= u.email %></span>
-            <span class="user-meta"><%= u.owner_name || '—' %><% if (u.dog_name) { %> · 🐾 <%= u.dog_name %><% } %></span>
-            <span class="user-meta"><%= d %></span>
-            <span class="user-code"><%= u.access_code || '—' %></span>
-            <span class="user-badge <%= u.onboarded ? 'onboarded' : 'pending' %>"><%= u.onboarded ? 'Onboarded' : 'Awaiting login' %></span>
-            <span class="user-view"><%= u.email === selected ? 'Viewing ↓' : 'View chats' %></span>
-          </a>
+          <div class="user-row <%= u.email === selected ? 'selected' : '' %>">
+            <a href="/admin?tester=<%= encodeURIComponent(u.email) %>" class="user-row-link">
+              <span class="user-email"><%= u.email %></span>
+              <span class="user-meta"><%= u.owner_name || '—' %><% if (u.dog_name) { %> · 🐾 <%= u.dog_name %><% } %></span>
+              <span class="user-meta"><%= d %></span>
+              <span class="user-code"><%= u.access_code || '—' %></span>
+              <span class="user-badge <%= u.onboarded ? 'onboarded' : 'pending' %>"><%= u.onboarded ? 'Onboarded' : 'Awaiting login' %></span>
+              <span class="user-view"><%= u.email === selected ? 'Viewing ↓' : 'View chats' %></span>
+            </a>
+            <form method="POST" action="/admin/users/<%= u.id %>/delete" class="user-delete-form" data-email="<%= u.email %>">
+              <button type="submit" class="user-delete-btn">Delete</button>
+            </form>
+          </div>
         <% }) %>
       <% } %>
     </div>
@@ -208,6 +223,18 @@
     function toggle(i) {
       document.getElementById('card-' + i).classList.toggle('open');
     }
+
+    // Confirm before permanently deleting a user — irreversible (cascades to their pet
+    // profile, every chat, and feedback). data-email (not an inline attribute value) so
+    // there's no HTML-attribute-quoting to get wrong with arbitrary email text.
+    document.querySelectorAll('.user-delete-form').forEach(function (form) {
+      form.addEventListener('submit', function (e) {
+        var email = form.getAttribute('data-email');
+        if (!confirm('Delete ' + email + '? This permanently removes their pet profile, all chats, and feedback. This cannot be undone.')) {
+          e.preventDefault();
+        }
+      });
+    });
   </script>
 </body>
 </html>
