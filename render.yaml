@@ -1,0 +1,63 @@
+## Render Blueprint — deploys the web service + a free managed Postgres together.
+## Usage: push this file to the repo, then in the Render dashboard choose
+## "New +" → "Blueprint" and point it at this repo. Render reads this file and
+## provisions both resources in one go. Full walkthrough: see DEPLOY.md.
+##
+## Free-tier notes:
+## - The web service spins down after 15 min idle and cold-starts on the next
+##   request (~30-60s, since @xenova/transformers downloads/loads the local
+##   embedding model on boot). Acceptable for testers, not for a always-on launch.
+## - The free Postgres instance expires after 90 days. Render emails a warning;
+##   you upgrade or spin up a fresh one (this app has no un-exportable state
+##   beyond kb_chunks, which just needs a re-ingest — see scripts/ingest-all-pdfs.sh).
+
+databases:
+  - name: prim-pets-db
+    plan: free
+    postgresMajorVersion: 16
+
+services:
+  - type: web
+    name: prim-pets
+    runtime: node
+    plan: free
+    region: oregon
+    branch: main
+    buildCommand: npm install && npm run migrate:up
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: prim-pets-db
+          property: connectionString
+      # Generated once by Render at first deploy, then stable across deploys.
+      - key: SESSION_SECRET
+        generateValue: true
+      # Set your own admin password in the Render dashboard after first deploy
+      # (Environment tab) — generateValue would produce one you'd have to go
+      # looking for, and this gate protects the tester feedback dashboard.
+      - key: ADMIN_SECRET
+        sync: false
+      - key: LLM_PROVIDER
+        value: groq
+      - key: GROQ_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: EMBEDDING_PROVIDER
+        value: local
+      - key: EMBEDDING_MODEL
+        value: Xenova/bge-base-en-v1.5
+      - key: ENABLE_RERANK
+        value: false
+      - key: VOYAGE_API_KEY
+        sync: false
+      - key: GOOGLE_PLACES_API_KEY
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: ENABLE_DEV_LOGIN
+        value: false

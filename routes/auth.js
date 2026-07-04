@@ -3,15 +3,24 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const { query } = require('../db');
+const { makeLimiter } = require('../middleware/rateLimit');
 
 const router = express.Router();
+
+// 10 attempts / 10 min / IP — bcrypt already makes each guess slow, this just caps the
+// total guesses an automated attacker gets against any one owner's access code.
+const loginLimiter = makeLimiter({ windowMs: 10 * 60 * 1000, max: 10 });
+
+// Used to run bcrypt.compare on a real hash shape even when no owner matched, so the
+// response time (and message) doesn't leak whether an email is a registered tester.
+const DUMMY_HASH = '$2a$10$CwTycUXWue0Thq9StjUM0uJ8Vs0dVdWXO8vs7v1i8j9OaHXR8QQ5W';
 
 router.get('/login', (req, res) => {
   if (req.session?.ownerId) return res.redirect('/');
   res.render('login', { error: null });
 });
 
-router.post('/login', async (req, res) => {
+router.post('/login', loginLimiter, async (req, res) => {
   const email = (req.body.email || '').toLowerCase().trim();
   const code = (req.body.access_code || '').trim();
 
@@ -26,13 +35,12 @@ router.post('/login', async (req, res) => {
     );
     const owner = result.rows[0];
 
-    if (!owner || !owner.access_code_hash) {
-      return res.render('login', { error: 'Email not recognised or no access code set. Contact the Whoof team.' });
-    }
-
-    const valid = await bcrypt.compare(code, owner.access_code_hash);
-    if (!valid) {
-      return res.render('login', { error: 'Incorrect access code. Check the code you were sent.' });
+    // Same message and (via the dummy-hash compare) roughly the same response time
+    // whether the email doesn't exist, has no code set, or the code is wrong — none of
+    // that should be distinguishable to someone probing for valid tester emails.
+    const valid = await bcrypt.compare(code, owner?.access_code_hash || DUMMY_HASH);
+    if (!owner || !owner.access_code_hash || !valid) {
+      return res.render('login', { error: 'Incorrect email or access code. Contact the Whoof team if you need one.' });
     }
 
     req.session.ownerId = owner.id;

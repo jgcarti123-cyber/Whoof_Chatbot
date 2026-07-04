@@ -1022,11 +1022,13 @@
 
   // marked turns the model's markdown into HTML but does NOT sanitize — it passes raw
   // HTML straight through. Run the result through DOMPurify before it touches innerHTML
-  // so a stray <script>/<img onerror> in an answer can't execute. If DOMPurify failed to
-  // load, fall back to marked-only (no worse than before — never blocks the chat).
+  // so a stray <script>/<img onerror> in an answer (model output, web-search content, or
+  // an owner-controlled field threaded through it) can't execute. Fail CLOSED: if the
+  // DOMPurify CDN script didn't load, escape the raw text instead of rendering unsanitized
+  // HTML — plain unformatted text is a much smaller cost than executing arbitrary markup.
   function renderMarkdown(text) {
-    const html = marked.parse(text || '');
-    return window.DOMPurify ? window.DOMPurify.sanitize(html) : html;
+    if (!window.marked || !window.DOMPurify) return escHtml(text || '');
+    return window.DOMPurify.sanitize(window.marked.parse(text || ''));
   }
   window.renderMarkdown = renderMarkdown;
 

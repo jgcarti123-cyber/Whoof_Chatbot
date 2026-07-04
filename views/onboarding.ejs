@@ -491,7 +491,7 @@
 
     // ── Body condition auto-calculator ───────────────────────────────────────
     // Breed weight ranges from the DB, passed in as JSON.
-    const BREED_RANGES = <%- JSON.stringify(
+    const BREED_RANGES = <%- safeJson(
       breeds.reduce((acc, b) => {
         if (b.weight_range_kg && b.weight_range_kg !== 'varies') {
           const m = b.weight_range_kg.match(/(\d+[\d.]*)[–\-](\d+[\d.]*)/);
@@ -636,12 +636,6 @@
       refreshVaccineRemoveBtns();
     }
     vaccineList.querySelectorAll('.vaccine-remove').forEach(b => b.addEventListener('click', removeVaccine));
-
-    // ── Theme toggle ────────────────────────────────────────────────────────
-    document.getElementById('theme-toggle').addEventListener('click', function () {
-      var light = document.documentElement.classList.toggle('light');
-      localStorage.setItem('whoof-theme', light ? 'light' : 'dark');
-    });
   </script>
 </body>
 </html>

@@ -1,7 +1,9 @@
 'use strict';
 
 const express = require('express');
+const crypto = require('crypto');
 const { query } = require('../db');
+const { makeLimiter } = require('../middleware/rateLimit');
 
 const router = express.Router();
 
@@ -11,6 +13,21 @@ if (process.env.NODE_ENV === 'production' && !process.env.ADMIN_SECRET) {
   throw new Error('ADMIN_SECRET must be set when NODE_ENV=production to protect /admin.');
 }
 const ADMIN_SECRET = process.env.ADMIN_SECRET || 'whoof-admin';
+const ADMIN_SECRET_BUF = Buffer.from(ADMIN_SECRET);
+
+// 8 attempts / 10 min / IP — this one password gates every tester's data, so brute force
+// here is a bigger deal than a single owner's account.
+const adminLoginLimiter = makeLimiter({ windowMs: 10 * 60 * 1000, max: 8 });
+
+// Constant-time compare — a plain `===` short-circuits on the first mismatched byte,
+// which leaks how many leading characters an attacker guessed correctly via response
+// timing. crypto.timingSafeEqual needs equal-length buffers, so pad/compare a fixed
+// length first and only timingSafeEqual once lengths already match.
+function secretMatches(candidate) {
+  const candidateBuf = Buffer.from(candidate);
+  if (candidateBuf.length !== ADMIN_SECRET_BUF.length) return false;
+  return crypto.timingSafeEqual(candidateBuf, ADMIN_SECRET_BUF);
+}
 
 // Middleware: require admin session flag
 function requireAdmin(req, res, next) {
@@ -25,8 +42,8 @@ router.get('/admin/login', (req, res) => {
 });
 
 // POST /admin/login
-router.post('/admin/login', (req, res) => {
-  if ((req.body.secret || '').trim() === ADMIN_SECRET) {
+router.post('/admin/login', adminLoginLimiter, (req, res) => {
+  if (secretMatches((req.body.secret || '').trim())) {
     req.session.adminAuth = true;
     req.session.save(() => res.redirect('/admin'));
   } else {

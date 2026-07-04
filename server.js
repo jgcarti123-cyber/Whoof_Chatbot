@@ -26,11 +26,39 @@ if (!sessionSecret) {
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
+// Safe way to embed a JS value inside an inline <script> block via <%- %>. Plain
+// JSON.stringify() does NOT escape "</script>" — if the value is owner-controlled
+// (pet name, saved vet name/clinic, etc.) a string containing that literal sequence
+// closes the tag early and lets anything after it run as a new <script>. Escaping
+// '<', '>', '&' (and the two line terminators some engines treat as string
+// terminators) makes the output inert HTML-wise while staying valid JS/JSON.
+app.locals.safeJson = (value) => JSON.stringify(value)
+  .replace(/</g, '\\u003c')
+  .replace(/>/g, '\\u003e')
+  .replace(/&/g, '\\u0026')
+  .replace(/\u2028/g, '\\u2028')
+  .replace(/\u2029/g, '\\u2029');
+
 // Behind an HTTPS proxy (Cloudflare tunnel, Render, etc.) trust X-Forwarded-Proto
 // so `secure` cookies are actually sent and req.protocol reflects the real scheme.
 if (isProd) app.set('trust proxy', 1);
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
+// A few baseline security headers with no dependency and no behavior change for this
+// app (no iframing, no third-party embedding of Whoof pages is a real use case):
+//   X-Content-Type-Options   — stop the browser guessing/executing a response as a
+//                              different content type than what was served.
+//   X-Frame-Options          — the login/admin pages can't be framed by another site
+//                              (clickjacking on the credential forms).
+//   Referrer-Policy          — don't leak the full URL (which can carry a memory_id,
+//                              session id in a query string, etc.) to third-party links.
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
