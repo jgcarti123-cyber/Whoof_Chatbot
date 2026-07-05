@@ -291,6 +291,24 @@ router.get('/api/chat/quota', requireAuth, async (req, res) => {
   }
 });
 
+// The pet's own name can collide with an unrelated public figure/place/brand that shares
+// it (this happened for real: a dog named "Messi" turned the web-search fallback into a
+// search for the footballer's daily routine). Before any text reaches the external search
+// API, replace the pet's name with a generic "the [breed] dog" phrase so no ambiguous
+// proper noun is ever sent out. This ONLY affects the outbound search string — the pet's
+// real name is used normally everywhere else (the prompt, the rendered answer).
+const GENERIC_BREEDS_RE = /^(unknown|mixed breed\s*\/?\s*unknown?)$/i;
+function sanitizeQueryForWebSearch(text, pet) {
+  if (!pet?.name) return text;
+  const name = pet.name.trim();
+  if (!name) return text;
+  const breed = (pet.breed || '').trim();
+  const breedPrefix = breed && !GENERIC_BREEDS_RE.test(breed) ? `${breed} ` : '';
+  const replacement = `the ${breedPrefix}dog`;
+  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return text.replace(new RegExp(`\\b${escapedName}\\b`, 'gi'), replacement);
+}
+
 // Turns the owner's clarifying answers into one text block, appended to the
 // original question — used both for retrieval and for the answer's context.
 function enrichMessage(message, clarifications) {
@@ -519,7 +537,8 @@ router.post('/api/chat/message', requireAuth, async (req, res) => {
     const kbWeak = chunks.length === 0 || topCosine < (wantsExternal ? 0.72 : 0.6);
     let webResults = [];
     if (kbWeak && !escalated && !recall && !recastText && webSearch.isConfigured()) {
-      webResults = await webSearch.searchWeb(rewrittenQuery !== enriched ? rewrittenQuery : message);
+      const rawSearchQuery = rewrittenQuery !== enriched ? rewrittenQuery : message;
+      webResults = await webSearch.searchWeb(sanitizeQueryForWebSearch(rawSearchQuery, pet));
     }
 
     const systemPrompt = buildSystemPrompt(pet, chunks, recentHistory, breedInfo, {
