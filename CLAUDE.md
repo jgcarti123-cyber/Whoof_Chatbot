@@ -77,7 +77,7 @@ you know which subsystem a task belongs to before you go looking:
 | Subsystem | What it does | Core files | `ARCHITECTURE.md` |
 |---|---|---|---|
 | **Chat request lifecycle** | The one endpoint (`POST /api/chat/message`) that pending-decision, booking, and place checks, emergency check, triage, RAG, and answer generation all flow through, in that order | `routes/chat.js` | §7 |
-| **LLM provider abstraction** | Single switch point for Groq/Anthropic; 4 primitives every model call goes through | `lib/llmProvider.js` | §4 |
+| **LLM provider abstraction** | Single switch point for Groq/Anthropic; 3 primitives every model call goes through | `lib/llmProvider.js` | §4 |
 | **Hybrid RAG (ingestion + retrieval)** | PDF → chunks → embeddings → `kb_chunks`; per-message vector+FTS fusion (RRF), optional rerank, web-search fallback when the KB is weak | `lib/rag.js`, `lib/embeddings.js`, `lib/webSearch.js`, `scripts/ingest-*` | §5, §6 |
 | **Triage** | Fast classifier: pet-related? needs clarifying questions before answering? | `lib/triage.js` | §8 |
 | **Structured output (`/visualise`)** | Opt-in card layout; text is the default for everything else | `lib/structured.js`, `lib/llm.js` | §9 |
@@ -89,6 +89,7 @@ you know which subsystem a task belongs to before you go looking:
 | **Feedback & admin** | Tester ratings on each turn; password-gated dashboard with a Users panel (every owner + access code + delete action) and a turn viewer | `routes/admin.js`, `views/admin*.ejs` | §16 |
 | **Excel export & Groq quota badge** | Ops-only tooling scoped to one tracked test account | `lib/exportExcel.js`, `lib/tokenUsage.js` | §17 |
 | **Self-serve signup** | Request-access form on the login page; creates the owner + a generated access code the admin relays | `routes/auth.js`, `views/login.ejs` | §19 |
+| **One-time feature tour** | Spotlight overlay shown once right after onboarding (Pet profile → Find nearby → My Vet → `/visualise`) | `public/chat-client.js`, `routes/chat.js` | §19, §21 |
 | **Rate limiting** | In-memory sliding-window limiter on login/signup/admin-login/delete-user | `middleware/rateLimit.js` | §24 |
 
 ## 3. Directory map
@@ -132,7 +133,7 @@ views/                 login.ejs, onboarding.ejs, chat.ejs, admin.ejs, admin-log
 public/                chat-client.js (~1,830 lines), style.css + chat-light.css (light-theme
                        overrides for the chat page), Cabinet Grotesk font
 kb-source/             Source guideline PDFs
-migrations/            Ordered DB schema migrations (node-pg-migrate), 25 so far
+migrations/            Ordered DB schema migrations (node-pg-migrate), 26 so far
 render.yaml            Render Blueprint: web service + managed Postgres (§10, ARCHITECTURE.md §23)
 DEPLOY.md               Render deployment walkthrough
 SECURITY.md             Summary of the security-hardening pass (§11, ARCHITECTURE.md §24)
@@ -219,6 +220,17 @@ Pulled from the project's commit history so intent doesn't get lost in a future 
   `SECURITY.md` for what each one prevents. Don't remove or loosen them for convenience
   (e.g. don't swap `crypto.timingSafeEqual` back to `===`, don't skip the rate limiter on a
   new auth-adjacent route).
+- **The web-search fallback's three-layer guard against an unrelated same-named entity is
+  deliberate, not redundant** (`sanitizeQueryForWebSearch()` in `routes/chat.js`, the
+  relevance filter in `lib/webSearch.js`, and the self-policing instruction in
+  `lib/llm.js`'s `webSection` — `ARCHITECTURE.md` §6a). This exists because a real user's
+  dog named "Messi" once surfaced the footballer's routine instead of dog-care content.
+  Don't collapse this to a single check — each layer catches a different failure mode.
+- **`embedVoyageBatch()`'s retry/backoff on a 429 is load-bearing, not optional polish**
+  (`lib/embeddings.js`) — a Voyage account with no payment method is capped at 3
+  requests/minute, and a KB ingest fires many calls back-to-back. Don't remove the backoff
+  even after a payment method is added; it's a safety net for any account, not a one-time
+  workaround.
 
 ## 6. Find results — card count & format spec
 
@@ -329,7 +341,12 @@ The short version:
   target's **hostname** (`localhost`/`127.0.0.1` → off, anything else → on), not from
   `NODE_ENV` — this matters for one-off scripts run locally against Render's external URL.
 - `kb-source/*.pdf` is gitignored, so a fresh database's KB starts empty until someone runs
-  the ingest script against it with a matching `EMBEDDING_PROVIDER`.
+  the ingest script against it with a matching `EMBEDDING_PROVIDER`. The current production
+  database has all 25 sources ingested (2,062 chunks) — a *new* database (e.g. after
+  recreating the free Postgres instance past its 90-day expiry) would need this rerun.
+  A Voyage account with no payment method is capped at 3 requests/minute, which a 25-PDF
+  ingest trips almost immediately — `embedVoyageBatch()` retries automatically, but a
+  payment method on the account removes the cap entirely and is much faster.
 - See operating rule 8 above: it's easy to have a terminal's `DATABASE_URL` pointed at
   Render while the browser is looking at `localhost` — verify before trusting a "local"
   test result.

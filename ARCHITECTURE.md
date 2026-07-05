@@ -138,7 +138,7 @@ routes/
   chat.js              THE core: POST /api/chat/message + chat pages   (~1,350 lines)
   admin.js             /admin dashboard (password-gated): Users panel + tester turns (§16)
 lib/
-  llmProvider.js       Provider switch (Groq/Anthropic). 4 primitives; feeds tokenUsage.
+  llmProvider.js       Provider switch (Groq/Anthropic). 3 primitives; feeds tokenUsage.
   llm.js               System-prompt builder + answer generation + routing
   rag.js               Retrieval: rewrite → embed → hybrid search → rerank
   embeddings.js        Local/Voyage embeddings (used by BOTH ingest & retrieval)
@@ -274,8 +274,14 @@ parse_pdf.py  (Python: PyMuPDF + pdfplumber)
   │  was found in the PDF layout (or a placeholder) — no vision-model step.
   ▼
 Embedding  (lib/embeddings.js → embedDocuments)
-  │  every chunk's "heading_path: content" string → a 768-dim vector.
-  │  Batched (16 at a time). Default model is LOCAL (no API).
+  │  every chunk's "heading_path: content" string → a vector (768-dim local model in dev,
+  │  1024-dim Voyage voyage-3 in production — see §18/§20/§23 for why they differ).
+  │  Batched (16 at a time). Voyage accounts with no payment method on file are capped at
+  │  3 requests/minute; embedVoyageBatch() backs off ~21s and retries (up to 6 attempts)
+  │  on a 429 instead of aborting the whole document — this was a real failure the first
+  │  time the KB was re-ingested against Voyage (24 of 25 PDFs failed outright before the
+  │  retry logic existed). Adding a payment method removes the harsh cap entirely; the
+  │  retry logic remains as a safety net either way.
   ▼
 DB write  (one transaction)
      DELETE existing rows for this source_title  → INSERT all chunks
@@ -313,7 +319,7 @@ owner question
   │     "his breath stinks and he won't eat" → "halitosis and anorexia in dogs"
   │     (makes the query match clinical guideline language; fails open to original)
   ▼
-  │  2. embedQuery()  (lib/embeddings.js)  → 768-dim vector
+  │  2. embedQuery()  (lib/embeddings.js)  → vector (768-dim local / 1024-dim Voyage, §5)
   ▼
   3. hybridSearch()  — Reciprocal Rank Fusion (RRF) of two legs, in ONE SQL query:
        ┌─────────────────────────────┐     ┌──────────────────────────────────┐
@@ -347,7 +353,9 @@ gives you the strengths of both without tuning a weight.
 spaces and retrieval silently breaks. Both go through `embeddings.js`, which is why it
 exists. The local model (`Xenova/bge-base-en-v1.5`, 768-dim) needs an instruction prefix on
 the **query only** — handled in `embedQuery()`. If you change the model, change the vector
-dimension in a migration and re-ingest everything.
+dimension in a migration and re-ingest everything. (This is exactly what happened in
+practice: production switched from the 768-dim local model to 1024-dim Voyage — §23 — which
+required migration 023 and a full re-ingest; the two vector spaces are not interchangeable.)
 
 **Breed lookup is separate** — `lookupBreed()` is a direct SQL lookup against
 `breed_reference` (exact → fuzzy substring → "Mixed breed" fallback), **not** vector search.
@@ -377,6 +385,25 @@ tightly so it can't turn into a general search engine:
 - `lib/webSearch.js` also exports a general-purpose `search()` (no veterinary query bias),
   used by `lib/communityPicks.js` (§13) to search for place recommendations rather than
   clinical content.
+
+**Guarding against an unrelated same-named entity.** A real accuracy failure: a dog named
+"Messi" asking about his ideal daily routine returned web results about the footballer
+Lionel Messi — the query sent the pet's literal name to Tavily with only a generic topical
+prefix, not enough to stop an ambiguous proper noun from dominating the search. Three
+layers of defense now guard against this, in `routes/chat.js` and `lib/webSearch.js`:
+
+1. **Query sanitization** (`sanitizeQueryForWebSearch()`, `routes/chat.js`) — the pet's name
+   is replaced with a generic "the [breed] dog" phrase in the **outbound search string
+   only**, right before the Tavily call. The pet's real name is used normally everywhere
+   else (the prompt, the rendered answer) — this only changes what the search engine sees,
+   and it guards against *any* name collision, not just this one.
+2. **Result relevance filtering** (`isPetRelevant()`, `lib/webSearch.js`) — any result
+   (including Tavily's own synthesized "Web summary" answer) that doesn't mention a
+   dog/pet/veterinary term is dropped before it can become a cited source, in case a search
+   engine still ranks noise despite a clean query.
+3. **Prompt-level self-policing** (`webSection` in `lib/llm.js`, §12) — the system prompt
+   explicitly tells the model to verify a web snippet is genuinely relevant before using it,
+   naming this exact failure mode as a last line of defense at generation time.
 
 ---
 
@@ -949,7 +976,7 @@ tables:
 
 | Table | Purpose | Key columns |
 |---|---|---|
-| `owners` | the logged-in user | `email`, `access_code_hash`, `access_code` (plaintext, admin-only — §16/§24), `owner_name` |
+| `owners` | the logged-in user | `email`, `access_code_hash`, `access_code` (plaintext, admin-only — §16/§24), `owner_name`, `tour_seen` (§19) |
 | `pet_profile` | the dog | `owner_id`, `name`, `breed`, `date_of_birth`, diet/vax/surgery JSON, temperament, `vets` (jsonb array, §15), `last_vet_visit_date`, `next_vet_visit_date`… |
 | `breed_reference` | breed facts (seeded) | `breed_name`, `common_conditions`, `weight_range_kg`, `temperament_notes` |
 | `kb_chunks` | RAG knowledge base | `embedding vector(1024)` (Voyage voyage-3 — see the dimension note below and §23), `fts_vector`, `content`, `source_title`, `section`, `page_number`, `chunk_type` |
@@ -982,7 +1009,9 @@ The structured-answer columns on `conversation_memory` come from migration
 `pet_profile.vets` supersedes the single-vet columns added in migration `018` (see §15,
 migration `019`); `next_vet_visit_date` is migration `020`. `response_feedback` is migration
 `017`; `token_usage_daily` is migration `022`. `signup_requests` is migration `024`;
-`owners.access_code` (the plaintext column) is migration `025`.
+`owners.access_code` (the plaintext column) is migration `025`; `owners.tour_seen` is
+migration `026`. `kb_chunks.embedding`'s switch to `vector(1024)` (Voyage) is migration
+`023` — see §5 for why.
 
 ---
 
@@ -1023,6 +1052,15 @@ just those three fields (no password to set). On submit:
 On a **successful login**, if the owner has a `signup_requests` row with `activated: false`,
 it's flipped to `true` (fire-and-forget, never blocks login) — that's the "Awaiting login" →
 "Onboarded" signal the admin dashboard shows per user.
+
+**One-time feature tour after onboarding.** `owners.tour_seen` (migration 026) gates a
+one-time interactive tour shown the first time a new owner reaches `/chat` right after
+completing onboarding — a spotlight overlay walks Pet profile → Find nearby → My Vet →
+`/visualise`, one step at a time (`initFeatureTour()` in `public/chat-client.js`). Skipping
+or finishing either way calls `POST /api/tour/seen`, which sets `tour_seen = true`
+permanently — it never shows again after that (deliberately not "whenever chat is empty").
+Backfilled `true` for every owner that already had a `pet_profile` at migration time, so
+existing testers weren't surprised with an unwanted first-run tour out of nowhere.
 
 **Owners created before the self-serve flow existed** (seeded via `scripts/seed-owners.js`,
 or any owner row older than migration 025) only have the bcrypt hash, no stored plaintext —
@@ -1134,6 +1172,13 @@ browser's system color-scheme preference with no in-app override.
   - the **Groq quota badge**, shown only when `GET /api/chat/quota` reports `visible: true`
     (§17);
   - the collapsible sidebar / mobile drawer described above;
+  - the **one-time feature tour** (`initFeatureTour()`, §19) — a spotlight overlay built
+    from a plain `<div>` whose oversized `box-shadow` paints the dark backdrop everywhere
+    except its own box (the "hole" effect around whichever sidebar item is being
+    explained), plus a positioned tooltip card. Measures the real target element and the
+    tooltip's own rendered size to place itself above/below correctly, and force-opens the
+    sidebar (desktop collapsed state or mobile drawer) so the highlighted item is never
+    hidden behind a closed panel;
   - `renderMarkdown()` — `marked` (markdown → HTML) piped through `DOMPurify` (strips any
     HTML `marked` passes through unsanitized) before it ever touches `innerHTML`. Fails
     **closed**: if `DOMPurify`/`marked` didn't load, the text is HTML-escaped instead of
@@ -1144,6 +1189,14 @@ browser's system color-scheme preference with no in-app override.
   plus a **Log in / Request access** tab toggle (§19) that swaps which form pane is visible
   and shows/hides matching help text, driven by a shared `active` class rather than
   duplicating markup per mode.
+- `views/onboarding.ejs` — the pet-profile form. Breed and city/state are **type-to-filter
+  comboboxes** (a visible chevron + styled suggestion panel, driven by one generic
+  `initCombobox(input, options)` function) rather than a native `<input list>`/`<datalist>`,
+  which is invisible until typed into and inconsistent across browsers. Both still accept
+  free text — the list only offers matches, never forces a selection. Breed options reuse
+  the same `breed_reference` data already used for prompt context and body-condition
+  calculation (no new data source); city/state is backed by a new static list of Tier 1 +
+  Tier 2 Indian cities.
 - `views/admin.ejs` / `admin-login.ejs` render the internal dashboard (§16) — mostly plain
   server-rendered tables; the one bit of client JS is the delete-user confirm dialog
   (`data-email` attribute + `addEventListener`, not an inline `onsubmit` string — avoids
@@ -1220,6 +1273,16 @@ Render's Events tab as "Instance failed — ran out of memory"). Switching
 per-call HTTP request; migration 023 changed `kb_chunks.embedding` to `vector(1024)` to
 match, and the whole KB had to be re-ingested with `EMBEDDING_PROVIDER=voyage` set (ingestion
 and retrieval must share one embedding space, §4).
+
+**Voyage's own free-tier rate limit then blocked that re-ingest** — a Voyage account with
+no payment method on file is capped at 3 requests/minute, regardless of app or caller; a
+25-document ingest fires many embedding calls back-to-back and tripped this almost
+immediately (24 of 25 PDFs failed with 429s on the first real attempt, unrelated to the
+memory issue above). Fixed two ways: `embedVoyageBatch()` now backs off and retries a 429
+instead of aborting the document (§5), and adding a payment method to the Voyage account
+removed the harsh cap entirely — the free 200M-token allowance still applied, so this cost
+nothing, it only unlocked normal throughput. The re-ingest then completed cleanly in a
+couple of minutes.
 
 **Connecting to Postgres from outside Render** — managed Postgres requires TLS, but
 presents a self-signed certificate chain, so the default `rejectUnauthorized: true` fails
