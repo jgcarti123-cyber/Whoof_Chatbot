@@ -1,16 +1,26 @@
-# Whoof Vet AI — Architecture & Flow
+# Prim Pets — Architecture & Flow
 
-A complete walkthrough of how Whoof works end-to-end, written so you can understand the
+A complete walkthrough of how Prim Pets works end-to-end, written so you can understand the
 flow and confidently make future changes. Every section points at the real files and
 functions.
+
+> **Naming note:** the product rebranded from "Whoof" to "Prim Pets" partway through
+> development. This doc uses the current brand throughout, but several internal
+> identifiers still literally say "whoof" for historical reasons and were deliberately
+> left alone (renaming them wasn't asked for and touches things like real filenames/DB
+> data, not just prose): the npm package name (`whoof-vet-ai-db`), the seeded demo
+> account's email domain (`demo.owner@whoof.example`), and the exported spreadsheet
+> filenames (`whoof-responses.xlsx`, `whoof-commit-log.xlsx`). If you're grepping the
+> codebase for something, try both names.
 
 > **TL;DR of the stack:** Node.js + Express 5 (no framework magic), EJS server-rendered
 > views, vanilla JS frontend, PostgreSQL 17 + `pgvector` for hybrid RAG. LLM calls go
 > through one swappable provider layer (Groq **or** Anthropic). Embeddings run locally
-> (no API) by default. There is no React, no build step, no ORM. Beyond the core Q&A loop,
-> the app also finds real nearby places (vets/parks/cafés), drafts WhatsApp vet-booking
-> messages, generates pre-vet-visit briefings, and logs tester feedback to an admin
-> dashboard + a live Excel export.
+> (no API) by default in dev; the deployed instance uses Voyage AI instead — see §23.
+> There is no React, no build step, no ORM. Beyond the core Q&A loop, the app also finds
+> real nearby places (vets/parks/cafés), drafts WhatsApp vet-booking messages, generates
+> pre-vet-visit briefings, and logs tester feedback to an admin dashboard + a live Excel
+> export. Self-serve signup (§19) and Render deployment (§23) came later in development.
 
 ---
 
@@ -38,13 +48,15 @@ functions.
 20. [Config / environment variables](#20-config--environment-variables)
 21. [Frontend](#21-frontend)
 22. ["Where do I change X?" — a practical guide](#22-where-do-i-change-x)
+23. [Deployment (Render)](#23-deployment-render)
+24. [Security hardening](#24-security-hardening)
 
 ---
 
 ## 1. The big picture
 
-Whoof is a veterinary chat assistant for dog owners. The owner logs in, fills a pet
-profile, and asks questions. Every answer is shaped by:
+Prim Pets is a veterinary chat assistant for dog owners. The owner logs in (or requests
+access — §19), fills a pet profile, and asks questions. Every answer is shaped by:
 
 - **The dog's profile** (breed, age, diet, history) — injected directly into the prompt.
 - **A curated knowledge base** of vet guideline PDFs — retrieved per question via hybrid
@@ -101,7 +113,8 @@ model turns into a reply.
 | Views | EJS | server-rendered `views/*.ejs` |
 | Frontend | Vanilla JS + CSS | `public/chat-client.js` (~1,800 lines), `public/style.css` |
 | DB | PostgreSQL 17 + `pgvector` | accessed via `pg` Pool, no ORM |
-| Migrations | `node-pg-migrate` | `migrations/17000000000XX_*.js`, 22 so far |
+| Migrations | `node-pg-migrate` | `migrations/17000000000XX_*.js`, 25 so far |
+| Hosting | Render (free tier) | web service + managed Postgres, see §23 |
 | Sessions | `express-session` + `connect-pg-simple` | stored in a Postgres `session` table |
 | LLM | Groq **or** Anthropic | switched by `LLM_PROVIDER` |
 | Embeddings | local Transformers.js **or** Voyage | switched by `EMBEDDING_PROVIDER` |
@@ -118,11 +131,12 @@ server.js              App bootstrap: middleware, session, route mounting, /heal
 db.js                  Single pg Pool; exports { pool, query }
 middleware/
   requireAuth.js       Gate: redirects to /login if no session.ownerId
+  rateLimit.js         In-memory sliding-window limiter (login/signup/admin, §24)
 routes/
-  auth.js              /login, /logout, /dev-login (opt-in via ENABLE_DEV_LOGIN)
+  auth.js              /login, /signup (§19), /logout, /dev-login (opt-in via ENABLE_DEV_LOGIN)
   profile.js           Onboarding + pet profile read/write
   chat.js              THE core: POST /api/chat/message + chat pages   (~1,350 lines)
-  admin.js             /admin dashboard (password-gated) for reviewing tester turns
+  admin.js             /admin dashboard (password-gated): Users panel + tester turns (§16)
 lib/
   llmProvider.js       Provider switch (Groq/Anthropic). 4 primitives; feeds tokenUsage.
   llm.js               System-prompt builder + answer generation + routing
@@ -145,12 +159,18 @@ scripts/
   ingest-all-pdfs.sh   Batch-ingest every PDF in kb-source/
   ingest-kb-pdf.js     One PDF → parse → embed → kb_chunks
   parse_pdf.py         PDF → structured JSON (chunks + extracted figures)
+  seed-owners.js       Creates/updates hardcoded test owner accounts + access codes
+  backfill-access-codes.js  Generates a fresh code for any owner missing one (§19)
   generate-commit-log.js  Regenerates whoof-commit-log.xlsx from `git log` (post-commit hook)
   install-git-hooks.sh   Installs that post-commit hook
 views/                 login.ejs, onboarding.ejs, chat.ejs, admin.ejs, admin-login.ejs
-public/                chat-client.js, style.css, brand assets
+public/                chat-client.js, style.css, chat-light.css (light-theme overrides,
+                       §21), brand assets
 kb-source/             The source guideline PDFs (not committed-tracked content)
 migrations/            Ordered DB schema migrations
+render.yaml            Render Blueprint: web service + managed Postgres (§23)
+DEPLOY.md               Render deployment walkthrough (§23)
+SECURITY.md             Summary of the security-hardening pass (§24)
 ```
 
 ---
@@ -477,7 +497,7 @@ questions for "how do I know if my dog has separation anxiety?", which is inform
 ```
 Round 1:  owner asks → triage says needs_clarification
           → server returns { needs_clarification, original_message, clarifying_questions }
-          → frontend renders chips + "type your own" + a "Get Whoof AI's answer" button
+          → frontend renders chips + "type your own" + a "Get the answer" button
 Round 2:  owner answers → frontend re-POSTs with clarifications: [{question, answer}, …]
           → triage is SKIPPED (clarifications present) → answer path runs, with the
             answers folded into the prompt (clarificationSection in buildSystemPrompt)
@@ -563,8 +583,8 @@ definitions.
 
 ## 10. The three kinds of memory (+ replying to a specific answer)
 
-A frequent point of confusion: Whoof has **three distinct memory mechanisms**, and only one
-of them is retrieval. Keeping them separate is a core design idea.
+A frequent point of confusion: Prim Pets has **three distinct memory mechanisms**, and only
+one of them is retrieval. Keeping them separate is a core design idea.
 
 | Memory | Scope | How it's used | File |
 |---|---|---|---|
@@ -648,6 +668,13 @@ pulls active ones into every prompt.
 `buildSystemPrompt()` in [lib/llm.js](lib/llm.js) assembles everything into one prompt. It's
 worth reading once — it's where the assistant's personality and rules live. Sections, in
 order:
+
+> **Known naming gap:** the model's own self-identification here is still literally "You
+> are Whoof AI" — the rebrand to Prim Pets touched every user-facing UI string (chat
+> header, welcome message, etc., §21) but not this prompt text. This is a deliberate gap,
+> not an oversight: changing it means touching the system prompt, which per this repo's
+> operating rules (`CLAUDE.md` §0.7) needs an explicit ask, not a guess. If you're asked to
+> fix it, this is the line.
 
 1. **Identity & rules** — "You are Whoof AI…", stay-in-lane (dogs only), an ingestion-safety
    carve-out (a dog getting into a human substance is always a toxicity question, never
@@ -750,7 +777,7 @@ degraded markdown.
 
 ## 14. Vet booking drafts over WhatsApp
 
-Whoof never contacts a clinic itself — it only **drafts** a short appointment-request message
+Prim Pets never contacts a clinic itself — it only **drafts** a short appointment-request message
 and hands the owner a one-tap `wa.me` deep link to review and send. This works for any
 clinic regardless of their tech setup, with no booking integration required.
 
@@ -861,11 +888,28 @@ block or affect a live conversation.
 
 **The admin dashboard** ([routes/admin.js](routes/admin.js), `views/admin.ejs` /
 `admin-login.ejs`): a simple password-gated view (`ADMIN_SECRET`, checked against
-`req.session.adminAuth` — see §19) for browsing one tester's full turn history at a time,
-with escalation flags, confidence levels, and any submitted rating/tags/comment, plus summary
-stats (average rating, count of low ratings ≤4). The tester list is currently a small
-hardcoded allowlist in the route (`rushiljohn10@gmail.com`, `tester123@gmail.com`) — widen
-that intentionally, not by accident.
+`req.session.adminAuth` with a constant-time compare — see §19/§24) with two parts:
+
+- **Users panel** — one row per owner (dynamically queried, not a hardcoded allowlist —
+  that was replaced when self-serve signup landed, §19), excluding the seeded demo account.
+  Each row shows: email, owner name + dog name (`COALESCE(pet_profile.name,
+  signup_requests.dog_name)` — falls back to what they typed at signup if they haven't
+  finished onboarding yet), the **plaintext access code** (`owners.access_code` — see §18
+  for why this is stored in plaintext alongside the bcrypt hash), an Onboarded/Awaiting-login
+  badge, and a **Delete** button. Clicking a row (anywhere except Delete) sets it as the
+  selected tester for the turn viewer below, via `?tester=<email>` — validated against the
+  real user list server-side, so an unknown value just falls back to the most recently
+  created user rather than rendering an empty state.
+- **Turn viewer** — for the selected tester: full turn history with escalation flags,
+  confidence levels, and any submitted rating/tags/comment, plus summary stats (average
+  rating, count of low ratings ≤4). Unchanged from the original design.
+
+**Deleting a user** — `POST /admin/users/:id/delete`: validates the id is a real UUID,
+then a single `DELETE FROM owners WHERE id = $1`. Every table with a foreign key to
+`owners` (directly or via `pet_profile`) is `ON DELETE CASCADE` (§18), so one delete
+removes the pet profile, every chat session/turn, feedback, and the signup request in one
+shot. Irreversible — the confirm dialog before submit lives client-side in `admin.ejs`,
+not as a second server-side check.
 
 ---
 
@@ -905,11 +949,12 @@ tables:
 
 | Table | Purpose | Key columns |
 |---|---|---|
-| `owners` | the logged-in user | `email`, `access_code_hash`, `owner_name` |
+| `owners` | the logged-in user | `email`, `access_code_hash`, `access_code` (plaintext, admin-only — §16/§24), `owner_name` |
 | `pet_profile` | the dog | `owner_id`, `name`, `breed`, `date_of_birth`, diet/vax/surgery JSON, temperament, `vets` (jsonb array, §15), `last_vet_visit_date`, `next_vet_visit_date`… |
 | `breed_reference` | breed facts (seeded) | `breed_name`, `common_conditions`, `weight_range_kg`, `temperament_notes` |
-| `kb_chunks` | RAG knowledge base | `embedding vector(768)`, `fts_vector`, `content`, `source_title`, `section`, `page_number`, `chunk_type` |
+| `kb_chunks` | RAG knowledge base | `embedding vector(1024)` (Voyage voyage-3 — see the dimension note below and §23), `fts_vector`, `content`, `source_title`, `section`, `page_number`, `chunk_type` |
 | `conversation_session` | one chat thread | `pet_id`, `title`, `pending_decision` (jsonb), `pinned`, `last_active_at` |
+| `signup_requests` | self-serve access requests (§19) | `owner_id` (FK→owners, CASCADE), `name`, `dog_name`, `access_code` (plaintext), `activated` (flips true on first login) |
 | `conversation_memory` | one Q&A turn | `owner_question`, `answer_summary`, `sources_cited`, `confidence_level`, `escalated`, `structured_answer` (jsonb), `response_modality`, `structured_trigger`, `structured_kind`, `summarized`, `reply_to_memory_id` (§10) |
 | `pet_memory` | rolling summary | `pet_id` (unique), `digest`, `updated_at` |
 | `pet_decisions` | locked facts | `pet_id`, `decision_type`, `title`, `content` (jsonb), `status` (active/superseded) |
@@ -917,27 +962,37 @@ tables:
 | `token_usage_daily` | Groq quota tracking (§17) | `usage_date`, `model`, `tokens_used` — PK `(usage_date, model)` |
 | `session` | express-session store | auto-created by connect-pg-simple |
 
-`kb_chunks.embedding` is `vector(768)` to match the local model. The hybrid search needs
-`fts_vector` (a generated `tsvector`) — that's migration 009. If you switch embedding models
-you must change this dimension and re-ingest.
+`kb_chunks.embedding` was originally `vector(768)` (local model), then switched to
+`vector(1024)` by migration `023` to match Voyage `voyage-3` — see §23 for why (Render's
+free-tier RAM cap can't hold the local model in-process). **This is a schema-level change,
+not just a deployed-env setting**: migrations apply sequentially, so any environment that
+runs the full chain — including local dev — ends up on `vector(1024)` regardless of what
+`EMBEDDING_PROVIDER` its own `.env` says (§20). Running local dev with
+`EMBEDDING_PROVIDER=local` against a fully-migrated database means the 768-dim local model
+is writing into a 1024-dim column, which breaks. Match `EMBEDDING_PROVIDER=voyage` locally
+too if you've run migration 023, or roll it back if you specifically want the local model
+back. The hybrid search needs `fts_vector` (a generated `tsvector`) — that's migration 009.
+Whichever embedding model you're on, ingestion and retrieval must **always** use the same
+one (§4/§5) — changing it is a migration for the dimension + a full re-ingest, never one
+without the other.
 
 The structured-answer columns on `conversation_memory` come from migration
 `016_structured-answers`; `reply_to_memory_id` from migration `021` (self-referencing FK,
 `ON DELETE SET NULL`). The three memory/decision tables come from migrations 012–015.
 `pet_profile.vets` supersedes the single-vet columns added in migration `018` (see §15,
 migration `019`); `next_vet_visit_date` is migration `020`. `response_feedback` is migration
-`017`; `token_usage_daily` is migration `022`.
+`017`; `token_usage_daily` is migration `022`. `signup_requests` is migration `024`;
+`owners.access_code` (the plaintext column) is migration `025`.
 
 ---
 
 ## 19. Auth & sessions
 
-Simple invite-based auth ([routes/auth.js](routes/auth.js)):
+Invite-based auth ([routes/auth.js](routes/auth.js)), now with a self-serve request-access
+path on top of the original seeded/invited model:
 
 - An owner row has an `access_code_hash` (bcrypt). Login = email + access code →
   `bcrypt.compare` → set `req.session.ownerId`.
-- No passwords, no signup — owners are seeded/invited. Access codes are handed out manually
-  ("contact the Whoof team").
 - The login page has a client-side **"Remember me"** checkbox that stashes the email + access
   code in `localStorage` (`whoof_remember`) purely for autofill convenience on that browser —
   this is a UX nicety, not a security mechanism; the server-side session is unaffected either
@@ -948,13 +1003,50 @@ Simple invite-based auth ([routes/auth.js](routes/auth.js)):
   a trusted local `.env`.
 - Sessions live in Postgres, so they survive restarts.
 
+**Self-serve signup** — `POST /signup`, body `{ email, name, dog_name }`. The login page
+(`views/login.ejs`) has a **Log in / Request access** tab toggle; the signup pane collects
+just those three fields (no password to set). On submit:
+
+1. Rejects if the email already has an owner row (`"already registered, contact John"` —
+   doesn't overwrite an existing account's code).
+2. Generates a 6-character code (`crypto.randomInt`, not `Math.random` — unpredictable from
+   PRNG state) via the same alphabet as `scripts/seed-owners.js` (no ambiguous `O`/`0`,
+   `I`/`l`/`1`).
+3. Creates the `owners` row with the bcrypt hash **and** the plaintext `access_code` (see
+   §18) — the plaintext exists purely so the admin dashboard (§16) can show it to relay to
+   the user; it's never used for the actual login check.
+4. Creates a `signup_requests` row (name, dog name, plaintext code, `activated: false`).
+5. Shows a "your request is in, John will send your code" success banner — the user cannot
+   log in yet; they need the code relayed to them out-of-band (WhatsApp/etc, via the admin
+   dashboard).
+
+On a **successful login**, if the owner has a `signup_requests` row with `activated: false`,
+it's flipped to `true` (fire-and-forget, never blocks login) — that's the "Awaiting login" →
+"Onboarded" signal the admin dashboard shows per user.
+
+**Owners created before the self-serve flow existed** (seeded via `scripts/seed-owners.js`,
+or any owner row older than migration 025) only have the bcrypt hash, no stored plaintext —
+bcrypt is one-way, so their code can't be recovered. `scripts/backfill-access-codes.js`
+generates and stores a fresh code for any owner where `access_code IS NULL`. **Running it
+replaces that owner's working login code** — only run it for owners who genuinely need a
+code surfaced in the dashboard (e.g. after adding this column to an existing deployment).
+
 `req.session.ownerId` is the only owner identity used app-wide; `requireAuth` enforces it.
 
+**Security hardening on login** (§24 has the full list) — both `/login` and `/signup` are
+rate-limited per-IP (`middleware/rateLimit.js`); a non-existent email and a wrong access
+code return the **same** error message and run `bcrypt.compare` against a dummy hash either
+way, so neither the response text nor its timing reveals whether an email is a registered
+user.
+
 **A separate admin auth** ([routes/admin.js](routes/admin.js), §16) protects `/admin`: a
-single shared password (`ADMIN_SECRET`) checked on `POST /admin/login`, setting
-`req.session.adminAuth = true`. Not tied to any owner account, and not gated by `requireAuth`
-— it has its own `requireAdmin` middleware. In production, `ADMIN_SECRET` must be set or the
-app fails to start (the dev fallback value is public knowledge in the source).
+single shared password (`ADMIN_SECRET`) checked on `POST /admin/login` with
+`crypto.timingSafeEqual` (not `===`, which leaks how many leading characters an attacker
+guessed via response timing — §24), setting `req.session.adminAuth = true`. Not tied to any
+owner account, and not gated by `requireAuth` — it has its own `requireAdmin` middleware,
+and its own rate limiter (tighter than the owner login's — one password gates every user's
+data). In production, `ADMIN_SECRET` must be set or the app fails to start (the dev fallback
+value is public knowledge in the source).
 
 > ⚠️ **Testing caution:** onboarding is an upsert keyed on `owner_id`. Never POST to
 > `/onboarding` or `/api/chat` under a real tester/demo account during automated testing —
@@ -979,27 +1071,49 @@ All in `.env` (gitignored). The ones that matter:
 | `GROQ_API_KEY` | — | required if provider=groq |
 | `GROQ_MODEL` / `GROQ_FAST_MODEL` | llama-3.3-70b / llama-3.1-8b | per-tier overrides |
 | `ANTHROPIC_API_KEY` | — | required if provider=anthropic |
-| `EMBEDDING_PROVIDER` | `local` | `local` (Transformers.js, no API) or `voyage` |
-| `EMBEDDING_MODEL` | `Xenova/bge-base-en-v1.5` | local model (768-dim) |
-| `VOYAGE_API_KEY` | — | needed for Voyage embeddings AND reranking |
+| `EMBEDDING_PROVIDER` | `local` | `local` (Transformers.js, no API) or `voyage` — **see the §18 warning**: the DB schema itself is currently pinned to `vector(1024)` (Voyage) by migration 023, so `local` (768-dim) only works against a database that hasn't run that migration |
+| `EMBEDDING_MODEL` | `Xenova/bge-base-en-v1.5` | local model (768-dim) — only relevant when `EMBEDDING_PROVIDER=local` |
+| `VOYAGE_API_KEY` | — | needed for Voyage embeddings AND reranking. **Effectively required on the deployed instance** (§23) — Render's free-tier RAM cap can't run the local model in-process, so `render.yaml` sets `EMBEDDING_PROVIDER=voyage` |
 | `ENABLE_RERANK` | unset (`false`) | `true` turns on Voyage cross-encoder reranking (per-message cost) |
 | `GOOGLE_PLACES_API_KEY` | — | required for the nearby vets/parks/cafés Find feature (§13) and clinic phone lookups (§14) |
 | `TAVILY_API_KEY` | — | required for the web-search KB fallback (§6a) and the community-picks layer (§13); both are simply skipped (fail-soft) if unset |
 
-The provider split means a common setup is: **Groq for the LLM** (fast, cheap, the
-`llama` models — note the low rate limits, hence the quota badge in §17)
-**+ local embeddings** (free, no rate limit).
+The provider split means a common **local dev** setup is: Groq for the LLM (fast, cheap,
+the `llama` models — note the low rate limits, hence the quota badge in §17) + local
+embeddings (free, no rate limit) — **as long as the local database hasn't run migration
+023** (see above). The **deployed** instance runs Groq for the LLM + Voyage for embeddings
+(§23), since local embeddings don't fit the free-tier RAM budget.
 
 ---
 
 ## 21. Frontend
 
 No framework — server-rendered EJS pages plus one vanilla JS controller
-(`public/chat-client.js`, ~1,800 lines).
+(`public/chat-client.js`, ~1,830 lines).
+
+**Rebrand & chat page redesign:** the product rebranded from "Whoof" to "Prim Pets"
+(coffee-bean `#1A1110` accent replacing the earlier violet, AI avatar initial "P" instead
+of "W"). The chat page (`views/chat.ejs`) was redesigned around a floating cream sidebar
+(brand row, New chat / Find nearby / Pet profile / My Vet, chat list, collapse toggle) with
+a centered hero + "Try asking" prompt card in the empty state, replacing the old top-bar
+layout. `public/chat-light.css` layers the light-theme shell on top of `style.css` (loaded
+after it, so it wins) rather than modifying `style.css` directly. Below ~640px the sidebar
+becomes an off-canvas drawer (slides in over a scrim, opened via a floating button) instead
+of just disappearing.
+
+**Theme note:** `chat.ejs` and `onboarding.ejs` are now **forced light** (`class="light"`
+hardcoded on `<html>`) — no toggle, no dark mode on these pages anymore. `views/login.ejs`
+is a fixed dark-hero landing/login page with no toggle at all. `admin.ejs` /
+`admin-login.ejs` are the only views that still auto-detect dark/light from
+`localStorage`/`prefers-color-scheme` — but since nothing writes to that `localStorage` key
+anymore (the toggle button UI was removed everywhere), in practice they just follow the
+browser's system color-scheme preference with no in-app override.
 
 - `views/chat.ejs` renders the page and any **persisted** turns. A stored structured card
   (including a `structured_kind: 'places'` turn, §13) is re-rendered from a `data-structured`
-  attribute on reload.
+  attribute on reload. Values embedded into an inline `<script>` block (pet name, saved
+  vets) go through `app.locals.safeJson()` (`server.js`, §24), not raw `JSON.stringify()` —
+  see §24 for why.
 - `public/chat-client.js` runs the live chat: capture input, parse slash commands
   (`parseFormatCommand`, mirroring the server), optimistic user bubble (`appendUserMessage`),
   POST to `/api/chat/message` (`postMessage`), render the reply. Beyond the core loop it also
@@ -1019,14 +1133,24 @@ No framework — server-rendered EJS pages plus one vanilla JS controller
     booking" button on a vet result card (§13/§14);
   - the **Groq quota badge**, shown only when `GET /api/chat/quota` reports `visible: true`
     (§17);
-  - dark/light theme toggle (`localStorage` + `prefers-color-scheme` fallback, anti-flicker
-    inline script in every view).
-- `views/login.ejs` adds a client-side "Remember me" checkbox (§19) that persists
-  email + access code in `localStorage` for autofill — not a server-side mechanism.
-- `views/admin.ejs` / `admin-login.ejs` render the internal dashboard (§16) — plain
-  server-rendered tables, no client JS of note.
-- `public/style.css` holds all styling (design tokens as CSS variables, Cabinet Grotesk
-  font, dark/light theme).
+  - the collapsible sidebar / mobile drawer described above;
+  - `renderMarkdown()` — `marked` (markdown → HTML) piped through `DOMPurify` (strips any
+    HTML `marked` passes through unsanitized) before it ever touches `innerHTML`. Fails
+    **closed**: if `DOMPurify`/`marked` didn't load, the text is HTML-escaped instead of
+    rendered as raw markup (§24). Both scripts are loaded from a CDN with a pinned version +
+    SRI hash (`views/chat.ejs`), so a tampered CDN response is refused by the browser.
+- `views/login.ejs` — the landing/login page. Client-side "Remember me" checkbox (§19) that
+  persists email + access code in `localStorage` for autofill (not a server-side mechanism),
+  plus a **Log in / Request access** tab toggle (§19) that swaps which form pane is visible
+  and shows/hides matching help text, driven by a shared `active` class rather than
+  duplicating markup per mode.
+- `views/admin.ejs` / `admin-login.ejs` render the internal dashboard (§16) — mostly plain
+  server-rendered tables; the one bit of client JS is the delete-user confirm dialog
+  (`data-email` attribute + `addEventListener`, not an inline `onsubmit` string — avoids
+  HTML-attribute-quoting pitfalls with arbitrary email text).
+- `public/style.css` holds the base styling (design tokens as CSS variables, Cabinet
+  Grotesk font, dark/light theme tokens — coffee-bean accent in light mode). `public/
+  chat-light.css` layers the chat-page-specific light shell on top, loaded after it.
 
 > **Reload rules:** route/lib edits need a server restart (or run `npm run dev` =
 > `node --watch`); client JS/CSS edits just need a browser hard-refresh (Cmd+Shift+R).
@@ -1055,8 +1179,10 @@ No framework — server-rendered EJS pages plus one vanilla JS controller
 | Change the booking-message wording | `lib/booking.js` |
 | Change the vet-visit briefing/checklist content or accuracy rules | `lib/vetSummary.js` |
 | Add/remove a feedback tag | `FEEDBACK_TAGS` in `routes/chat.js` (server) — mirror in the frontend widget |
-| Change who can see the admin dashboard / tracked-tester features | the tester allowlists in `routes/admin.js`, `lib/exportExcel.js`, and `routes/chat.js`'s `QUOTA_VISIBLE_EMAIL` |
+| Change who can see the tracked-tester features (Excel export, quota badge) | the tracked-email checks in `lib/exportExcel.js` and `routes/chat.js`'s `QUOTA_VISIBLE_EMAIL` — the admin dashboard itself has no allowlist anymore, it shows every owner (§16) |
+| Add a new admin dashboard action | `routes/admin.js` (route, gated by `requireAdmin`) + `views/admin.ejs` (row markup) — see the delete-user action (§16) for the pattern |
 | Change the DB schema | add a `migrations/…js` file, then `npm run migrate:up` |
+| Deploy a change | push to `main` — Render redeploys automatically and re-runs `migrate:up` in the build step (§23) |
 
 ---
 
@@ -1070,3 +1196,106 @@ with no LLM key → falls back to a plain regex guess rather than blocking the m
 community-picks layer times out or errors → plain Google places, unchanged. This is why the
 app keeps working even when a provider is rate-limited (you'll see warnings in the logs, not
 crashes).
+
+---
+
+## 23. Deployment (Render)
+
+Full step-by-step walkthrough lives in [DEPLOY.md](DEPLOY.md) — this section is the
+architectural summary of *why* it's set up the way it is.
+
+**`render.yaml`** is a Render Blueprint: pushing it and choosing "New → Blueprint" in the
+Render dashboard provisions both resources together —a free web service (`prim-pets`) and a
+free managed Postgres (`prim-pets-db`). The build command is `npm install && npm run
+migrate:up`, so every deploy re-applies any pending migrations automatically — a deploy and
+a schema migration are the same event here, not two separate steps to remember.
+
+**Why embeddings run on Voyage AI in production, not the local model** (§4/§18/§20): the
+free web service caps out at 512MB RAM. The local embedding model
+(`Xenova/bge-base-en-v1.5`, ONNX runtime) needs enough of that to get OOM-killed
+mid-request once Node/Express/the Postgres pool are also loaded — this actually happened
+and surfaced to users as a generic "Network error" (the real cause only showed up in
+Render's Events tab as "Instance failed — ran out of memory"). Switching
+`EMBEDDING_PROVIDER=voyage` removes the in-process model entirely in exchange for a small
+per-call HTTP request; migration 023 changed `kb_chunks.embedding` to `vector(1024)` to
+match, and the whole KB had to be re-ingested with `EMBEDDING_PROVIDER=voyage` set (ingestion
+and retrieval must share one embedding space, §4).
+
+**Connecting to Postgres from outside Render** — managed Postgres requires TLS, but
+presents a self-signed certificate chain, so the default `rejectUnauthorized: true` fails
+the handshake. `db.js` decides whether to enable SSL from the connection target's hostname
+(`localhost`/`127.0.0.1` → no SSL; anything else → SSL with `rejectUnauthorized: false`),
+not from `NODE_ENV` — that matters because one-off scripts run locally
+(`scripts/seed-owners.js`, `scripts/ingest-all-pdfs.sh`, `scripts/backfill-access-codes.js`)
+against a `DATABASE_URL` pointed at Render's **external** connection string (found in the
+Render dashboard → the database → Info tab) never set `NODE_ENV=production` themselves.
+Deciding from the hostname instead means the same script works correctly against either
+target without an extra flag.
+
+**A concrete failure mode worth knowing about:** it's easy to end up with a terminal whose
+`DATABASE_URL` is exported to Render (left over from running one of the scripts above)
+while `localhost:3000` in the browser is still the locally-running server — meaning
+`localhost:3000/admin` is silently reading and writing the **Render** database, not your
+local one. If local queries and what the browser shows disagree, check `ps eww <pid> | grep
+DATABASE_URL` for the actual running server process before assuming a code bug.
+
+**Free-tier limits:**
+- **The web service spins down after 15 minutes idle** and cold-starts on the next request.
+  Fine for a private beta, not for an always-on public launch — upgrading the Render plan
+  removes this (also removes the 512MB RAM cap that forced the Voyage switch above).
+- **The free Postgres instance expires after 90 days** — Render emails a warning in
+  advance; re-ingest the KB (only thing worth re-seeding) against whichever database
+  replaces it.
+- `kb-source/*.pdf` is gitignored (large binaries), so a fresh database's `kb_chunks` starts
+  empty — chat still works, it just falls back to the web-search path (§6) until the KB is
+  ingested against that database.
+
+---
+
+## 24. Security hardening
+
+A full-codebase security review found and fixed the following (see
+[SECURITY.md](SECURITY.md) for the complete list with severity/verification detail):
+
+- **Stored XSS via `<script>`-tag breakout.** Owner-controlled fields (pet name, saved vet
+  name/clinic) were embedded into inline `<script>` blocks with plain `JSON.stringify()`,
+  which does not escape a literal `</script>` sequence — an HTML tokenizer closes the tag
+  on that sequence regardless of JS string quoting, letting anything after it execute.
+  Fixed with `app.locals.safeJson()` (`server.js`) — escapes `<`, `>`, `&`, and the two JS
+  line-terminator characters (U+2028/U+2029) before JSON-encoding. Used everywhere a value
+  is embedded into a `<script>` block (`views/chat.ejs`, `views/onboarding.ejs`).
+- **Markdown sanitizer failing open.** `renderMarkdown()` (`public/chat-client.js`) used to
+  fall back to *raw, unsanitized* HTML if the DOMPurify CDN script failed to load. Now
+  fails **closed** — escapes to plain text instead (§21).
+- **No integrity check on CDN scripts.** `marked`/`DOMPurify` are pinned to a specific
+  version with a real SHA-384 `integrity` hash + `crossorigin`, so a tampered/compromised
+  CDN response is refused by the browser rather than silently executed.
+- **No rate limiting anywhere.** Added a small dependency-free sliding-window limiter
+  (`middleware/rateLimit.js`, in-memory — fine for a single-process free-tier deployment)
+  on `/login`, `/signup`, `/admin/login`, and `/admin/users/:id/delete`.
+- **Account enumeration + timing leak on `/login`.** The "email not found" and "wrong code"
+  branches used to return different messages, and the not-found branch skipped
+  `bcrypt.compare` entirely (faster response = a tell). Now both paths return the identical
+  message and always run `bcrypt.compare` (against a dummy hash when there's no real owner),
+  so neither message content nor response timing reveals whether an email is registered.
+- **Timing-unsafe admin secret comparison.** `ADMIN_SECRET` was compared with plain `===`,
+  which short-circuits on the first mismatched byte — a textbook timing side-channel
+  against a single high-value shared secret. Switched to `crypto.timingSafeEqual`.
+  (`routes/admin.js`)
+- **Missing baseline security headers.** Added `X-Content-Type-Options: nosniff`,
+  `X-Frame-Options: DENY`, and `Referrer-Policy: strict-origin-when-cross-origin`
+  app-wide (`server.js`), no new dependency.
+
+**Checked and already clean:** SQL injection (every query across `routes/` and `lib/` is
+parameterized — no string-built SQL anywhere), SSRF (Google Places/Tavily calls use fixed
+URLs, no user-controlled fetch targets), path traversal (the Excel export path is fixed),
+secrets (nothing hardcoded, `.env` never committed), CSRF (mitigated by `sameSite: strict`
+session cookies and no state-changing `GET` routes), and ownership scoping (every
+chat/vet/decision route re-derives the pet from the session and checks ownership before
+touching a row — one owner can't read or modify another's data).
+
+**Flagged, not fixed:** `npm audit` shows known CVEs in `xlsx` (prototype pollution + ReDoS,
+no fix available upstream) and the `protobufjs` chain pulled in transitively by
+`@xenova/transformers`. Verified not exploitable in this codebase's actual usage — `xlsx`
+is only ever used to *write* (no `XLSX.read`/`readFile` call anywhere), and the embeddings
+model files aren't attacker-supplied.
