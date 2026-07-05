@@ -468,3 +468,47 @@ body.form-page .form-section {
   /* Keep the first message clear of the floating open button */
   body.chat-page .messages-area { padding-top: 60px; }
 }
+
+/* ── One-time feature tour (spotlight overlay) ───────────────────────────────
+   .tour-overlay has no background of its own — the dark backdrop comes from
+   .tour-spotlight's oversized box-shadow, which paints everywhere except its own
+   box, creating the "hole" around whichever sidebar item is being explained.
+   Neither element sets pointer-events:none, so the underlying page stays fully
+   inert during the tour — only the tooltip's own Skip/Next buttons are live. ── */
+.tour-overlay { position: fixed; inset: 0; z-index: 300; }
+.tour-spotlight {
+  position: fixed;
+  border-radius: 10px;
+  box-shadow: 0 0 0 9999px rgba(18,17,16,.6);
+  transition: top .25s ease, left .25s ease, width .25s ease, height .25s ease;
+}
+.tour-tooltip {
+  position: fixed;
+  width: 300px;
+  background: #fff;
+  border-radius: 14px;
+  padding: 16px 18px;
+  box-shadow: 0 12px 36px rgba(18,17,16,.28);
+  transition: top .25s ease, left .25s ease;
+}
+.tour-step-count {
+  font-size: .7rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  color: #A39E93; margin-bottom: 6px;
+}
+.tour-title { font-size: 1rem; font-weight: 800; color: #121110; margin-bottom: 6px; }
+.tour-body { font-size: .86rem; line-height: 1.5; color: #4A453E; margin-bottom: 14px; }
+.tour-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.tour-skip {
+  background: transparent; border: 0; padding: 0;
+  font-size: .82rem; font-weight: 600; color: #A39E93; cursor: pointer;
+}
+.tour-skip:hover { color: #4A453E; }
+.tour-next {
+  background: #121110; color: #F4F2ED; border: 0; border-radius: 999px;
+  padding: 9px 18px; font-size: .84rem; font-weight: 700; cursor: pointer;
+  transition: background .15s, transform .15s;
+}
+.tour-next:hover { background: #000; transform: translateY(-1px); }
+@media (max-width: 420px) {
+  .tour-tooltip { width: calc(100vw - 32px); }
+}

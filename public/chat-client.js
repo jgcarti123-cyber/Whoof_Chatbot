@@ -1488,6 +1488,124 @@
     try { if (localStorage.getItem('pp-sidebar-collapsed') === '1') setCollapsed(true); } catch (e) { /* noop */ }
   })();
 
+  // ── One-time feature tour ────────────────────────────────────────────────
+  // Shown once, right after a brand-new owner finishes onboarding (server sets
+  // window.__SHOW_TOUR__ from owners.tour_seen — see routes/chat.js). A spotlight
+  // overlay walks Pet profile → Find nearby → My Vet → /visualise, one at a time.
+  // Skipping or finishing both mark it seen (POST /api/tour/seen) so it never shows again.
+  (function initFeatureTour() {
+    if (!window.__SHOW_TOUR__) return;
+
+    const TOUR_STEPS = [
+      {
+        selector: '#pet-profile-link',
+        title: 'Pet profile',
+        body: "Start here — fill in your dog's breed, age, diet, allergies, and vaccination history. The more Prim Pets knows, the more specific every answer is.",
+      },
+      {
+        selector: '#vet-finder-btn',
+        title: 'Find nearby',
+        body: 'Tap this to find real, verified vets, parks, and pet-friendly cafés near you — never invented places.',
+      },
+      {
+        selector: '#vet-panel-toggle',
+        title: 'My Vet',
+        body: "Save your regular vet's contact, track visit dates, and generate a one-tap summary to bring to your next appointment.",
+      },
+      {
+        selector: '#message-input',
+        title: '/visualise',
+        body: 'Type /visualise before a question — like "/visualise a week of meals" — to get the answer laid out as a visual card instead of plain text.',
+      },
+    ];
+    const steps = TOUR_STEPS.filter(function (s) { return document.querySelector(s.selector); });
+    if (!steps.length) return; // nothing real to point at — bail rather than show a broken tour
+
+    let stepIndex = 0;
+    let overlay, spotlight, tooltip;
+
+    function markSeen() {
+      fetch('/api/tour/seen', { method: 'POST' }).catch(function () { /* best-effort, never blocks the UI */ });
+    }
+    function teardown() {
+      if (overlay) overlay.remove();
+      document.removeEventListener('keydown', onKeydown);
+      window.removeEventListener('resize', reposition);
+    }
+    function finish() { teardown(); markSeen(); }
+    function onKeydown(e) { if (e.key === 'Escape') finish(); }
+
+    // A brand-new user could in principle land here with the sidebar collapsed/closed
+    // (e.g. a restored localStorage flag) — force it open so the highlighted elements
+    // are actually visible instead of pointing a spotlight at a hidden element.
+    function ensureSidebarVisible() {
+      document.body.classList.remove('sb-collapsed');
+      if (window.matchMedia('(max-width: 640px)').matches) {
+        document.body.classList.add('sb-mobile-open');
+      }
+    }
+
+    function renderStep() {
+      ensureSidebarVisible();
+      const step = steps[stepIndex];
+      const target = document.querySelector(step.selector);
+      if (!target) { finish(); return; }
+
+      const rect = target.getBoundingClientRect();
+      const pad = 8;
+      spotlight.style.top = (rect.top - pad) + 'px';
+      spotlight.style.left = (rect.left - pad) + 'px';
+      spotlight.style.width = (rect.width + pad * 2) + 'px';
+      spotlight.style.height = (rect.height + pad * 2) + 'px';
+
+      const isLast = stepIndex === steps.length - 1;
+      tooltip.innerHTML =
+        '<div class="tour-step-count">' + (stepIndex + 1) + ' of ' + steps.length + '</div>' +
+        '<div class="tour-title">' + escHtml(step.title) + '</div>' +
+        '<div class="tour-body">' + escHtml(step.body) + '</div>' +
+        '<div class="tour-actions">' +
+          '<button type="button" class="tour-skip">Skip tour</button>' +
+          '<button type="button" class="tour-next">' + (isLast ? 'Got it, let’s chat' : 'Next') + '</button>' +
+        '</div>';
+
+      // Measure the tooltip's real rendered size (already in the DOM) to place it
+      // below the target when there's room, else above — no guessed height.
+      const tRect = tooltip.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const top = spaceBelow > (tRect.height + 24)
+        ? rect.bottom + pad + 12
+        : Math.max(12, rect.top - pad - 12 - tRect.height);
+      let left = rect.left;
+      const maxLeft = window.innerWidth - tRect.width - 16;
+      if (left > maxLeft) left = Math.max(16, maxLeft);
+      tooltip.style.top = top + 'px';
+      tooltip.style.left = left + 'px';
+
+      tooltip.querySelector('.tour-skip').addEventListener('click', finish);
+      tooltip.querySelector('.tour-next').addEventListener('click', function () {
+        if (isLast) { finish(); return; }
+        stepIndex++;
+        renderStep();
+      });
+    }
+
+    function reposition() { if (overlay) renderStep(); }
+
+    overlay = document.createElement('div');
+    overlay.className = 'tour-overlay';
+    spotlight = document.createElement('div');
+    spotlight.className = 'tour-spotlight';
+    tooltip = document.createElement('div');
+    tooltip.className = 'tour-tooltip';
+    overlay.appendChild(spotlight);
+    overlay.appendChild(tooltip);
+    document.body.appendChild(overlay);
+
+    renderStep();
+    document.addEventListener('keydown', onKeydown);
+    window.addEventListener('resize', reposition);
+  })();
+
   // ── Sidebar drag-to-resize ───────────────────────────────────────────────
   (function initSidebarResize() {
     const sidebar = document.querySelector('.chat-sidebar');

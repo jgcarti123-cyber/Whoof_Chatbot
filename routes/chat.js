@@ -188,7 +188,7 @@ function extractSymptomTags(text) {
 router.get('/chat', requireAuth, async (req, res) => {
   try {
     const petResult = await query(
-      `SELECT p.*, o.owner_name FROM pet_profile p
+      `SELECT p.*, o.owner_name, o.tour_seen FROM pet_profile p
        JOIN owners o ON o.id = p.owner_id
        WHERE p.owner_id = $1 LIMIT 1`,
       [req.session.ownerId],
@@ -197,6 +197,9 @@ router.get('/chat', requireAuth, async (req, res) => {
 
     const pet = petResult.rows[0];
     const ownerName = pet.owner_name || '';
+    // One-time feature tour (Pet profile → Find nearby → My Vet → /visualise), shown once
+    // right after onboarding. Flips to true via POST /api/tour/seen when skipped/finished.
+    const showTour = !pet.tour_seen;
 
     // All chats for the sidebar: pinned first, then most recently used.
     const sessionsRes = await query(
@@ -240,10 +243,23 @@ router.get('/chat', requireAuth, async (req, res) => {
       }));
     }
 
-    res.render('chat', { pet, history, sessions, activeSessionId, ownerName });
+    res.render('chat', { pet, history, sessions, activeSessionId, ownerName, showTour });
   } catch (err) {
     console.error('Chat GET error:', err);
     res.status(500).send('Error loading chat.');
+  }
+});
+
+// POST /api/tour/seen — mark the one-time feature tour as seen (skipped or finished,
+// either way it never shows again). Idempotent; failing silently is fine here — worst
+// case the tour shows once more on a later visit, never a broken chat experience.
+router.post('/api/tour/seen', requireAuth, async (req, res) => {
+  try {
+    await query('UPDATE owners SET tour_seen = true WHERE id = $1', [req.session.ownerId]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Tour-seen update error:', err);
+    res.status(500).json({ error: 'Could not save.' });
   }
 });
 
