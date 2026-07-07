@@ -61,3 +61,7 @@ npm run dev
 | [DEPLOY.md](DEPLOY.md) | Deploying to Render |
 | [SECURITY.md](SECURITY.md) | The security-hardening pass |
 | [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md) | How this was built, and every real bug fixed along the way |
+
+## License
+
+[MIT](LICENSE)
