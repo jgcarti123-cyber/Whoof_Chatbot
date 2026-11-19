@@ -87,14 +87,24 @@
       position: relative;
       min-height: 100svh;
       display: flex; align-items: center;
-      background: #1A1109 url('/16_9.png') center / cover no-repeat;
+      background: #1A1109;
+      isolation: isolate;
+    }
+    /* Photo layer — graded for a radiant, clear, premium look */
+    .lp-login::after {
+      content: '';
+      position: absolute; inset: 0; z-index: -2;
+      background: url('/16_9.png') center / cover no-repeat;
+      filter: contrast(1.12) saturate(1.14) brightness(1.1) sepia(.06);
     }
     .lp-login::before {
       content: '';
-      position: absolute; inset: 0;
+      position: absolute; inset: 0; z-index: -1;
       background:
-        linear-gradient(to right, rgba(16,10,4,.88) 0%, rgba(16,10,4,.62) 42%, rgba(16,10,4,.12) 78%, rgba(16,10,4,.28) 100%),
-        linear-gradient(to top, rgba(16,10,4,.55), transparent 30%);
+        radial-gradient(ellipse 42% 55% at 62% 30%, rgba(255,196,110,.30), transparent 70%),
+        radial-gradient(ellipse 120% 100% at 62% 40%, transparent 55%, rgba(10,6,2,.55) 100%),
+        linear-gradient(to right, rgba(16,10,4,.80) 0%, rgba(16,10,4,.46) 40%, rgba(16,10,4,.04) 74%, rgba(16,10,4,.14) 100%),
+        linear-gradient(to top, rgba(16,10,4,.45), transparent 28%);
     }
     .lp-login-inner {
       position: relative; z-index: 1;
